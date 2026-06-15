@@ -1,13 +1,66 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Get a free hosted Postgres database in seconds: `npx create-db`
-
 generator client {
-  provider = "prisma-client"
-  output   = "../generated/prisma"
+  provider = "prisma-client-js"
 }
 
 datasource db {
   provider = "postgresql"
+}
+
+enum ConversationStatus {
+  A_TRAITER
+  TRAITE
+  A_PLANIFIER
+  EN_ATTENTE
+}
+
+enum Channel {
+  MAIL
+  WHATSAPP
+  SMS
+  CALL
+}
+
+enum Direction {
+  INBOUND
+  OUTBOUND
+}
+
+model Contact {
+  id            String         @id @default(cuid())
+  name          String
+  email         String?
+  phone         String?
+  role          String?
+  company       String?
+  conversations Conversation[]
+  createdAt     DateTime       @default(now())
+
+  @@map("contacts")
+}
+
+model Conversation {
+  id            String             @id @default(cuid())
+  contactId     String
+  contact       Contact            @relation(fields: [contactId], references: [id])
+  subject       String?
+  status        ConversationStatus @default(A_TRAITER)
+  unreadCount   Int                @default(0)
+  lastMessageAt DateTime           @default(now())
+  messages      Message[]
+  createdAt     DateTime           @default(now())
+
+  @@map("conversations")
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  channel        Channel
+  direction      Direction
+  content        String
+  meta           Json?
+  timestamp      DateTime     @default(now())
+
+  @@map("messages")
 }
