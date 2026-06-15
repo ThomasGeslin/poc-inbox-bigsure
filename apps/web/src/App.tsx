@@ -30,10 +30,18 @@ function App() {
       .finally(() => setLoading(false));
   }, []);
 
-  /** Fetch messages when the active conversation changes */
+  /** Fetch messages when the active conversation changes + poll every 5s for inbound */
   useEffect(() => {
     if (!activeId) return;
     fetchMessages(activeId).then(setActiveMessages);
+
+    const interval = setInterval(() => {
+      fetchMessages(activeId).then(setActiveMessages);
+      // Also refresh conversation list to update unreadCount / lastMessage
+      fetchConversations().then(setConversations);
+    }, 5000);
+
+    return () => clearInterval(interval);
   }, [activeId]);
 
   /** Handle conversation selection */
