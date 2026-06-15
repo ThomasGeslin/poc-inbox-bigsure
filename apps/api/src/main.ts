@@ -7,7 +7,10 @@ import { AppModule } from './app.module';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
-  // Parse JSON and URL-encoded bodies (required for Twilio webhooks)
+  // Force JSON parsing on Cloudmailin webhook regardless of Content-Type header
+  app.use('/api/webhooks/mail/inbound', json({ type: '*/*' }));
+
+  // Parse JSON and URL-encoded bodies (required for Twilio webhooks and REST API)
   app.use(json());
   app.use(urlencoded({ extended: true }));
 

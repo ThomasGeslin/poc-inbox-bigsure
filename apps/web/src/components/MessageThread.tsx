@@ -118,7 +118,11 @@ export default function MessageThread({
       </div>
 
       {/* ── Reply box ───────────────────────────────────────────────────── */}
-      <ReplyBox conversationId={conversation.id} onSent={onSent} />
+      <ReplyBox
+        conversationId={conversation.id}
+        messages={messages}
+        onSent={onSent}
+      />
     </main>
   );
 }

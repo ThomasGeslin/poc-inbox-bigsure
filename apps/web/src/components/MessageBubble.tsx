@@ -92,10 +92,18 @@ export default function MessageBubble({ message }: MessageBubbleProps) {
           </p>
         )}
 
-        {/* Body */}
-        <p className="text-sm whitespace-pre-wrap leading-relaxed">
-          {message.content}
-        </p>
+        {/* Body — render HTML for mail, plain text otherwise */}
+        {message.channel === "mail" ? (
+          <div
+            className="text-sm leading-relaxed prose prose-sm max-w-none prose-p:my-1 prose-a:text-indigo-300"
+            // Content comes from our own backend / Resend — not arbitrary user input
+            dangerouslySetInnerHTML={{ __html: message.content }}
+          />
+        ) : (
+          <p className="text-sm whitespace-pre-wrap leading-relaxed">
+            {message.content}
+          </p>
+        )}
 
         {/* Footer: channel icon + timestamp */}
         <div

@@ -29,14 +29,23 @@ const PLACEHOLDER: Record<ReplyChannel, string> = {
 
 interface ReplyBoxProps {
   conversationId: string;
+  messages: Message[];
   onSent: (message: Message) => void;
 }
 
-export default function ReplyBox({ conversationId, onSent }: ReplyBoxProps) {
+export default function ReplyBox({
+  conversationId,
+  messages,
+  onSent,
+}: ReplyBoxProps) {
   const [channel, setChannel] = useState<ReplyChannel>("mail");
   const [body, setBody] = useState("");
   const [subject, setSubject] = useState("");
   const [sending, setSending] = useState(false);
+
+  // Show the subject field only when composing mail and no prior mail exists
+  const hasPriorMail = messages.some((m) => m.channel === "mail");
+  const showSubject = channel === "mail" && !hasPriorMail;
 
   const canSend = body.trim().length > 0 && !sending;
 
@@ -45,11 +54,16 @@ export default function ReplyBox({ conversationId, onSent }: ReplyBoxProps) {
 
     setSending(true);
 
+    // Wrap mail content in HTML paragraph(s)
+    const content =
+      channel === "mail"
+        ? `<p>${body.trim().replace(/\n/g, "<br>")}</p>`
+        : body.trim();
+
     sendMessage(conversationId, {
       channel,
-      content: body.trim(),
-      subject:
-        channel === "mail" && subject.trim() ? subject.trim() : undefined,
+      content,
+      subject: showSubject && subject.trim() ? subject.trim() : undefined,
     })
       .then((msg) => {
         onSent(msg);
@@ -80,8 +94,8 @@ export default function ReplyBox({ conversationId, onSent }: ReplyBoxProps) {
       </div>
 
       <div className="px-4 pb-3 pt-2">
-        {/* Subject for mail */}
-        {channel === "mail" && (
+        {/* Subject for first mail in conversation */}
+        {showSubject && (
           <input
             type="text"
             value={subject}

@@ -38,6 +38,10 @@ export interface MessageMeta {
   duration?: number; // seconds
   callStatus?: CallStatus;
   subject?: string;
+  // Mail threading
+  messageId?: string;
+  inReplyTo?: string;
+  references?: string[];
 }
 
 export interface Message {

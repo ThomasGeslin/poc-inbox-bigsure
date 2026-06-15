@@ -17,6 +17,7 @@ import { parsePhoneNumber, isValidPhoneNumber } from 'libphonenumber-js';
 import { TwilioInboundDto } from '../dto/twilio-inbound.dto';
 import { TwilioService } from '../services/twilio.service';
 import { ReceiveInboundMessageCommand } from '../commands/receive-inbound-message.command';
+import { ReceiveMailCommand } from '../commands/receive-mail.command';
 
 @Controller('webhooks')
 export class WebhooksController {
@@ -159,6 +160,91 @@ export class WebhooksController {
 
     // --- Return empty TwiML to prevent Twilio retries ---
     res.status(200).set('Content-Type', 'text/xml').send(this.emptyTwiml());
+  }
+
+  // ── Mail inbound ─────────────────────────────────────────────────────────
+  // Compatible avec Cloudmailin (JSON Normalized), Mailgun (inbound parse)
+  // et les tests manuels via curl.
+  // Cloudmailin: configurer l'URL de destination sur https://ton-ngrok/api/webhooks/mail/inbound
+  // Format Cloudmailin JSON Normalized → champs: envelope.from, headers.subject,
+  // html, plain, headers.message_id, headers.in_reply_to, headers.references
+
+  @Post('mail/inbound')
+  @HttpCode(HttpStatus.OK)
+  async handleMailInbound(
+    @Body()
+    body: {
+      // Format direct (tests curl / intégrations simples)
+      from?: string;
+      subject?: string;
+      html?: string;
+      text?: string;
+      messageId?: string;
+      inReplyTo?: string;
+      references?: string;
+      // Format Cloudmailin JSON Normalized
+      envelope?: { from?: string; to?: string };
+      headers?: {
+        subject?: string;
+        message_id?: string;
+        in_reply_to?: string;
+        references?: string;
+        // Mailgun uses these names too
+        'Message-Id'?: string;
+        'In-Reply-To'?: string;
+        References?: string;
+      };
+      plain?: string;
+    },
+  ): Promise<{ received: boolean }> {
+    // Log raw body for debugging provider format
+    this.logger.debug(`Mail inbound raw body: ${JSON.stringify(body)}`);
+
+    if (!body || typeof body !== 'object') {
+      this.logger.error(`Unexpected body type: ${typeof body}`);
+      throw new BadRequestException('Unexpected body format');
+    }
+
+    // Normalize fields across providers
+    const from = body.from ?? body.envelope?.from ?? '';
+
+    if (!from) {
+      throw new BadRequestException('Missing required field: from');
+    }
+
+    const subject = body.subject ?? body.headers?.subject ?? '(sans objet)';
+
+    const content = body.html ?? body.text ?? body.plain ?? '';
+
+    const messageId =
+      body.messageId ??
+      body.headers?.message_id ??
+      body.headers?.['Message-Id'];
+
+    const inReplyTo =
+      body.inReplyTo ??
+      body.headers?.in_reply_to ??
+      body.headers?.['In-Reply-To'];
+
+    const referencesRaw =
+      body.references ?? body.headers?.references ?? body.headers?.References;
+
+    const references = referencesRaw
+      ? referencesRaw.split(/\s+/).filter(Boolean)
+      : undefined;
+
+    await this.commandBus.execute(
+      new ReceiveMailCommand(
+        from,
+        subject,
+        content,
+        messageId,
+        inReplyTo,
+        references,
+      ),
+    );
+
+    return { received: true };
   }
 
   private normalizePhone(raw: string): string | null {

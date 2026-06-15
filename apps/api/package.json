@@ -33,7 +33,9 @@
     "pg": "^8.21.0",
     "prisma": "^7.8.0",
     "reflect-metadata": "^0.2.2",
+    "resend": "^6.12.4",
     "rxjs": "^7.8.1",
+    "svix": "^1.95.2",
     "twilio": "^6.0.2"
   },
   "devDependencies": {

@@ -9,6 +9,7 @@ import { ContactsController } from './controllers/contacts.controller';
 // Command handlers
 import { SendMessageHandler } from './commands/send-message.handler';
 import { ReceiveInboundMessageHandler } from './commands/receive-inbound-message.handler';
+import { ReceiveMailHandler } from './commands/receive-mail.handler';
 import { UpdateConversationStatusHandler } from './commands/update-conversation-status.handler';
 import { UpdateContactHandler } from './commands/update-contact.handler';
 
@@ -18,10 +19,12 @@ import { GetConversationMessagesHandler } from './queries/get-conversation-messa
 
 // Services
 import { TwilioService } from './services/twilio.service';
+import { ResendService } from './services/resend.service';
 
 const CommandHandlers = [
   SendMessageHandler,
   ReceiveInboundMessageHandler,
+  ReceiveMailHandler,
   UpdateConversationStatusHandler,
   UpdateContactHandler,
 ];
@@ -35,6 +38,11 @@ const QueryHandlers = [GetConversationsHandler, GetConversationMessagesHandler];
     WebhooksController,
     ContactsController,
   ],
-  providers: [...CommandHandlers, ...QueryHandlers, TwilioService],
+  providers: [
+    ...CommandHandlers,
+    ...QueryHandlers,
+    TwilioService,
+    ResendService,
+  ],
 })
 export class InboxModule {}
