@@ -49,6 +49,28 @@ export function formatDuration(seconds: number): string {
   return `${m} min ${String(s).padStart(2, "0")}s`;
 }
 
+const AVATAR_COLORS = [
+  "bg-violet-500",
+  "bg-sky-500",
+  "bg-rose-500",
+  "bg-amber-500",
+  "bg-emerald-500",
+  "bg-indigo-500",
+  "bg-pink-500",
+  "bg-teal-500",
+];
+
+/** Deterministically pick a color class from a contact id */
+export function getAvatarColor(id: string): string {
+  let hash = 0;
+
+  for (let i = 0; i < id.length; i++) {
+    hash = (hash * 31 + id.charCodeAt(i)) >>> 0;
+  }
+
+  return AVATAR_COLORS[hash % AVATAR_COLORS.length];
+}
+
 /** "SM" from "Sophie Martin" */
 export function getInitials(name: string): string {
   return name

@@ -11,6 +11,7 @@ enum ConversationStatus {
   TRAITE
   A_PLANIFIER
   EN_ATTENTE
+  DEVIS_APRES_VISITE
 }
 
 enum Channel {
@@ -44,6 +45,7 @@ model Conversation {
   contact       Contact            @relation(fields: [contactId], references: [id])
   subject       String?
   status        ConversationStatus @default(A_TRAITER)
+  channel       Channel            @default(MAIL)
   unreadCount   Int                @default(0)
   lastMessageAt DateTime           @default(now())
   messages      Message[]
