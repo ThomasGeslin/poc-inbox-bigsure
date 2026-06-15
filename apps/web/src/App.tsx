@@ -20,6 +20,7 @@ function App() {
   const [filterStatus, setFilterStatus] = useState<FilterStatus>("pending");
   const [activeMessages, setActiveMessages] = useState<Message[]>([]);
 
+  /** Fetch conversations on mount */
   useEffect(() => {
     fetchConversations()
       .then((data) => {
@@ -29,14 +30,33 @@ function App() {
       .finally(() => setLoading(false));
   }, []);
 
+  /** Fetch messages when the active conversation changes */
   useEffect(() => {
     if (!activeId) return;
     fetchMessages(activeId).then(setActiveMessages);
   }, [activeId]);
 
+  /** Handle conversation selection */
   function handleSelect(id: string) {
     setActiveMessages([]);
     setActiveId(id);
+  }
+
+  /** Handle message sent */
+  function handleSent(message: Message) {
+    setActiveMessages((prev) => [...prev, message]);
+    setConversations((prev) =>
+      prev.map((conv) =>
+        conv.id === message.conversationId
+          ? {
+              ...conv,
+              lastMessageAt: message.timestamp,
+              lastMessage: message.content,
+              unreadCount: 0,
+            }
+          : conv,
+      ),
+    );
   }
 
   const contacts: Contact[] = conversations.map((c) => c.contact);
@@ -79,6 +99,7 @@ function App() {
             conversation={activeConv}
             messages={activeMessages}
             contact={activeContact}
+            onSent={handleSent}
           />
 
           <ContactPanel contact={activeContact} conversation={activeConv} />

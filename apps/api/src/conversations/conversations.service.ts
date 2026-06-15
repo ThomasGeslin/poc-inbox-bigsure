@@ -69,4 +69,43 @@ export class ConversationsService {
       meta: msg.meta ?? undefined,
     }));
   }
+
+  async createMessage(
+    conversationId: string,
+    dto: { channel: string; content: string; subject?: string },
+  ) {
+    const channelKey = (
+      Object.entries(CHANNEL_MAP) as [Channel, string][]
+    ).find(([, v]) => v === dto.channel)?.[0];
+
+    if (!channelKey) throw new Error(`Unknown channel: ${dto.channel}`);
+
+    const meta = dto.subject ? { subject: dto.subject } : undefined;
+
+    const [message] = await this.prisma.$transaction([
+      this.prisma.message.create({
+        data: {
+          conversationId,
+          channel: channelKey,
+          direction: 'OUTBOUND',
+          content: dto.content,
+          meta,
+        },
+      }),
+      this.prisma.conversation.update({
+        where: { id: conversationId },
+        data: { lastMessageAt: new Date(), unreadCount: 0 },
+      }),
+    ]);
+
+    return {
+      id: message.id,
+      conversationId: message.conversationId,
+      channel: CHANNEL_MAP[message.channel],
+      direction: 'outbound' as const,
+      content: message.content,
+      timestamp: message.timestamp.toISOString(),
+      meta: message.meta ?? undefined,
+    };
+  }
 }

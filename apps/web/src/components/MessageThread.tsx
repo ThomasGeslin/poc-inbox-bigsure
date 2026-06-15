@@ -11,6 +11,7 @@ interface MessageThreadProps {
   conversation: Conversation;
   messages: Message[];
   contact: Contact;
+  onSent: (message: Message) => void;
 }
 
 /** Group messages by calendar day for date separators */
@@ -37,6 +38,7 @@ export default function MessageThread({
   conversation,
   messages,
   contact,
+  onSent,
 }: MessageThreadProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -116,7 +118,7 @@ export default function MessageThread({
       </div>
 
       {/* ── Reply box ───────────────────────────────────────────────────── */}
-      <ReplyBox conversationId={conversation.id} />
+      <ReplyBox conversationId={conversation.id} onSent={onSent} />
     </main>
   );
 }

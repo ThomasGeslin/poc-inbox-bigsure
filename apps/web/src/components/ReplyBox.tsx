@@ -6,7 +6,8 @@ import {
   MessageSquare,
   MessageCircle,
 } from "lucide-react";
-import type { Channel } from "../types";
+import type { Channel, Message } from "../types";
+import { sendMessage } from "../lib/api";
 
 type ReplyChannel = Exclude<Channel, "call">;
 
@@ -28,20 +29,34 @@ const PLACEHOLDER: Record<ReplyChannel, string> = {
 
 interface ReplyBoxProps {
   conversationId: string;
+  onSent: (message: Message) => void;
 }
 
-export default function ReplyBox({ conversationId: _ }: ReplyBoxProps) {
+export default function ReplyBox({ conversationId, onSent }: ReplyBoxProps) {
   const [channel, setChannel] = useState<ReplyChannel>("mail");
   const [body, setBody] = useState("");
   const [subject, setSubject] = useState("");
+  const [sending, setSending] = useState(false);
 
-  const canSend = body.trim().length > 0;
+  const canSend = body.trim().length > 0 && !sending;
 
   function handleSend() {
     if (!canSend) return;
-    // TODO: wire to backend / state
-    setBody("");
-    setSubject("");
+
+    setSending(true);
+
+    sendMessage(conversationId, {
+      channel,
+      content: body.trim(),
+      subject:
+        channel === "mail" && subject.trim() ? subject.trim() : undefined,
+    })
+      .then((msg) => {
+        onSent(msg);
+        setBody("");
+        setSubject("");
+      })
+      .finally(() => setSending(false));
   }
 
   return (
@@ -106,9 +121,9 @@ export default function ReplyBox({ conversationId: _ }: ReplyBoxProps) {
               type="button"
               onClick={handleSend}
               disabled={!canSend}
-              className="flex items-center gap-2 px-4 py-1.5 bg-indigo-600 text-white text-xs font-semibold rounded-lg hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              className="flex items-center gap-2 px-4 py-1.5 bg-indigo-600 text-white text-xs font-semibold rounded-lg hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors hover:cursor-pointer"
             >
-              Envoyer
+              {sending ? "Envoi…" : "Envoyer"}
               <Send size={12} />
             </button>
           </div>

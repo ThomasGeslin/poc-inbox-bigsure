@@ -37,3 +37,25 @@ export async function fetchMessages(
 
   return res.json();
 }
+
+export interface SendMessagePayload {
+  channel: string;
+  content: string;
+  subject?: string;
+}
+
+/** Send an outbound message on a conversation */
+export async function sendMessage(
+  conversationId: string,
+  payload: SendMessagePayload,
+): Promise<Message> {
+  const res = await fetch(`${BASE_URL}/conversations/${conversationId}/messages`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) throw new Error("Failed to send message");
+
+  return res.json();
+}
