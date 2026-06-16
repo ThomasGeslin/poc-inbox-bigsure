@@ -6,6 +6,7 @@ import {
   MessageCircle,
   MessageSquare,
   Phone,
+  UserPlus,
 } from "lucide-react";
 import type {
   Contact,
@@ -14,6 +15,7 @@ import type {
   FilterStatus,
 } from "../types";
 import ConversationItem from "./ConversationItem";
+import CreateContactModal from "./CreateContactModal";
 
 interface ConversationListProps {
   conversations: Conversation[];
@@ -25,6 +27,7 @@ interface ConversationListProps {
   onFilterChannel: (ch: FilterChannel) => void;
   filterStatus: FilterStatus;
   onFilterStatus: (s: FilterStatus) => void;
+  onContactCreated?: (contact: Contact) => void;
 }
 
 const CHANNEL_TABS: {
@@ -50,8 +53,10 @@ export default function ConversationList({
   onFilterChannel,
   filterStatus,
   onFilterStatus,
+  onContactCreated,
 }: ConversationListProps) {
   const [search, setSearch] = useState("");
+  const [createModalOpen, setCreateModalOpen] = useState(false);
 
   const pendingCount = allConversations.filter(
     (conv) => conv.status !== "treated",
@@ -193,6 +198,28 @@ export default function ConversationList({
           })
         )}
       </div>
+
+      {/* ── New contact button ────────────────────────────────────────────── */}
+      <div className="px-3 py-3 border-t border-gray-100">
+        <button
+          type="button"
+          onClick={() => setCreateModalOpen(true)}
+          className="flex items-center justify-center gap-2 w-full py-2 text-xs font-medium text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors hover:cursor-pointer"
+        >
+          <UserPlus size={13} />
+          Nouveau contact
+        </button>
+      </div>
+
+      {createModalOpen && (
+        <CreateContactModal
+          onClose={() => setCreateModalOpen(false)}
+          onCreated={(contact) => {
+            onContactCreated?.(contact);
+            setCreateModalOpen(false);
+          }}
+        />
+      )}
     </aside>
   );
 }

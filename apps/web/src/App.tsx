@@ -50,6 +50,12 @@ function App() {
     setActiveId(id);
   }
 
+  /** Handle contact created */
+  function handleContactCreated() {
+    // Refresh conversation list so the new contact appears if they get a conversation
+    fetchConversations().then(setConversations);
+  }
+
   /** Handle contact updated */
   function handleContactUpdated(updated: Contact) {
     setConversations((prev) =>
@@ -117,6 +123,7 @@ function App() {
         onFilterChannel={setFilterChannel}
         filterStatus={filterStatus}
         onFilterStatus={setFilterStatus}
+        onContactCreated={handleContactCreated}
       />
 
       {activeConv && activeContact ? (

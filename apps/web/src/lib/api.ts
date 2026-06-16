@@ -49,13 +49,39 @@ export async function sendMessage(
   conversationId: string,
   payload: SendMessagePayload,
 ): Promise<Message> {
-  const res = await fetch(`${BASE_URL}/conversations/${conversationId}/messages`, {
+  const res = await fetch(
+    `${BASE_URL}/conversations/${conversationId}/messages`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+
+  if (!res.ok) throw new Error("Failed to send message");
+
+  return res.json();
+}
+
+export interface CreateContactPayload {
+  name: string;
+  email?: string;
+  phone?: string;
+  role?: string;
+  company?: string;
+}
+
+/** Create a new contact */
+export async function createContact(
+  payload: CreateContactPayload,
+): Promise<Omit<Contact, "avatarColor">> {
+  const res = await fetch(`${BASE_URL}/contacts`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
 
-  if (!res.ok) throw new Error("Failed to send message");
+  if (!res.ok) throw new Error("Failed to create contact");
 
   return res.json();
 }
