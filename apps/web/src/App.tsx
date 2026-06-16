@@ -50,6 +50,15 @@ function App() {
     setActiveId(id);
   }
 
+  /** Handle contact updated */
+  function handleContactUpdated(updated: Contact) {
+    setConversations((prev) =>
+      prev.map((conv) =>
+        conv.contact.id === updated.id ? { ...conv, contact: updated } : conv,
+      ),
+    );
+  }
+
   /** Handle message sent */
   function handleSent(message: Message) {
     setActiveMessages((prev) => [...prev, message]);
@@ -110,7 +119,11 @@ function App() {
             onSent={handleSent}
           />
 
-          <ContactPanel contact={activeContact} conversation={activeConv} />
+          <ContactPanel
+            contact={activeContact}
+            conversation={activeConv}
+            onContactUpdated={handleContactUpdated}
+          />
         </>
       ) : (
         <div className="flex-1 flex flex-col items-center justify-center gap-3 text-gray-400">

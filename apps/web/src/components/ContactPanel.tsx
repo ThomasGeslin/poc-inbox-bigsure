@@ -1,13 +1,9 @@
-import {
-  Mail,
-  Phone,
-  Briefcase,
-  ExternalLink,
-  ChevronRight,
-} from "lucide-react";
+import { useState } from "react";
+import { Mail, Phone, ExternalLink, ChevronRight, Pencil } from "lucide-react";
 import type { Contact, Conversation } from "../types";
 import Avatar from "./Avatar";
 import StatusBadge from "./StatusBadge";
+import EditContactModal from "./EditContactModal";
 
 // ── Static mock data for the panel ─────────────────────────────────────────
 const REFERENT = {
@@ -25,16 +21,29 @@ const LINKED_ORDER = {
 interface ContactPanelProps {
   contact: Contact;
   conversation: Conversation;
+  onContactUpdated?: (updated: Contact) => void;
 }
 
 export default function ContactPanel({
   contact,
   conversation,
+  onContactUpdated,
 }: ContactPanelProps) {
+  const [modalOpen, setModalOpen] = useState(false);
+
   return (
     <aside className="w-80 flex-shrink-0 bg-white border-l border-gray-200 flex flex-col h-full overflow-y-auto">
       {/* ── Identity ──────────────────────────────────────────────────────── */}
-      <div className="flex flex-col items-center px-6 pt-8 pb-6 border-b border-gray-100">
+      <div className="flex flex-col items-center px-6 pt-8 pb-6 border-b border-gray-100 relative">
+        <button
+          type="button"
+          onClick={() => setModalOpen(true)}
+          className="absolute top-4 right-4 p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+          title="Modifier le contact"
+        >
+          <Pencil size={14} />
+        </button>
+
         <Avatar
           name={contact.name}
           colorClass={contact.avatarColor}
@@ -61,7 +70,6 @@ export default function ContactPanel({
         {[
           { Icon: Mail, label: "Email", value: contact.email },
           { Icon: Phone, label: "Téléphone", value: contact.phone },
-          { Icon: Briefcase, label: "Entreprise", value: contact.company },
         ].map(({ Icon, label, value }) => (
           <div key={label} className="flex items-center gap-3">
             <div className="w-7 h-7 bg-gray-100 rounded-lg flex items-center justify-center flex-shrink-0">
@@ -70,7 +78,6 @@ export default function ContactPanel({
 
             <div className="min-w-0">
               <p className="text-xs text-gray-400">{label}</p>
-
               <p className="text-xs font-medium text-gray-700 truncate">
                 {value}
               </p>
@@ -135,6 +142,17 @@ export default function ContactPanel({
           Rattacher à un dossier
         </button>
       </div>
+
+      {modalOpen && (
+        <EditContactModal
+          contact={contact}
+          onClose={() => setModalOpen(false)}
+          onSaved={(updated) => {
+            onContactUpdated?.(updated);
+            setModalOpen(false);
+          }}
+        />
+      )}
     </aside>
   );
 }

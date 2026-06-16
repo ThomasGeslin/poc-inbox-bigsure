@@ -59,3 +59,27 @@ export async function sendMessage(
 
   return res.json();
 }
+
+export interface UpdateContactPayload {
+  name?: string;
+  email?: string;
+  phone?: string;
+  role?: string;
+  company?: string;
+}
+
+/** Update a contact's information */
+export async function updateContact(
+  contactId: string,
+  payload: UpdateContactPayload,
+): Promise<Omit<Contact, "avatarColor">> {
+  const res = await fetch(`${BASE_URL}/contacts/${contactId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) throw new Error("Failed to update contact");
+
+  return res.json();
+}

@@ -4,11 +4,13 @@ import { CqrsModule } from '@nestjs/cqrs';
 // Controllers
 import { ConversationsController } from './controllers/conversations.controller';
 import { WebhooksController } from './controllers/webhooks.controller';
+import { ContactsController } from './controllers/contacts.controller';
 
 // Command handlers
 import { SendMessageHandler } from './commands/send-message.handler';
 import { ReceiveInboundMessageHandler } from './commands/receive-inbound-message.handler';
 import { UpdateConversationStatusHandler } from './commands/update-conversation-status.handler';
+import { UpdateContactHandler } from './commands/update-contact.handler';
 
 // Query handlers
 import { GetConversationsHandler } from './queries/get-conversations.handler';
@@ -21,13 +23,18 @@ const CommandHandlers = [
   SendMessageHandler,
   ReceiveInboundMessageHandler,
   UpdateConversationStatusHandler,
+  UpdateContactHandler,
 ];
 
 const QueryHandlers = [GetConversationsHandler, GetConversationMessagesHandler];
 
 @Module({
   imports: [CqrsModule],
-  controllers: [ConversationsController, WebhooksController],
+  controllers: [
+    ConversationsController,
+    WebhooksController,
+    ContactsController,
+  ],
   providers: [...CommandHandlers, ...QueryHandlers, TwilioService],
 })
 export class InboxModule {}
