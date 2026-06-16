@@ -2,7 +2,7 @@ import { CommandHandler, ICommandHandler } from '@nestjs/cqrs';
 import { Logger } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { ReceiveInboundMessageCommand } from './receive-inbound-message.command';
-import { Message } from '@prisma/client';
+import { Message, Prisma } from '@prisma/client';
 
 @CommandHandler(ReceiveInboundMessageCommand)
 export class ReceiveInboundMessageHandler implements ICommandHandler<ReceiveInboundMessageCommand> {
@@ -57,7 +57,10 @@ export class ReceiveInboundMessageHandler implements ICommandHandler<ReceiveInbo
           channel,
           direction: 'INBOUND',
           content,
-          meta: meta ?? undefined,
+          meta:
+            meta !== undefined
+              ? (meta as Prisma.InputJsonValue)
+              : Prisma.JsonNull,
         },
       }),
       this.prisma.conversation.update({
