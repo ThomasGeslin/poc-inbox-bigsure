@@ -3,6 +3,7 @@ import { X, Check, Mail, Phone, Briefcase, User, Pencil } from "lucide-react";
 import type { Contact } from "../types";
 import { updateContact } from "../lib/api";
 import Avatar from "./Avatar";
+import { useToast } from "./useToast";
 
 interface EditContactModalProps {
   contact: Contact;
@@ -23,6 +24,8 @@ export default function EditContactModal({
   onClose,
   onSaved,
 }: EditContactModalProps) {
+  const toast = useToast();
+
   const [form, setForm] = useState<EditForm>({
     name: contact.name,
     email: contact.email,
@@ -57,7 +60,10 @@ export default function EditContactModal({
     try {
       const updated = await updateContact(contact.id, form);
       onSaved({ ...updated, avatarColor: contact.avatarColor });
+      toast("success", "Contact mis à jour");
       onClose();
+    } catch {
+      toast("error", "Impossible de mettre à jour le contact");
     } finally {
       setSaving(false);
     }

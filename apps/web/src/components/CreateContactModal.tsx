@@ -3,6 +3,7 @@ import { X, Check, Mail, Phone, Briefcase, User, Pencil } from "lucide-react";
 import type { Contact } from "../types";
 import { createContact } from "../lib/api";
 import { getAvatarColor } from "../utils/helpers";
+import { useToast } from "./useToast";
 
 interface CreateContactModalProps {
   onClose: () => void;
@@ -21,6 +22,8 @@ export default function CreateContactModal({
   onClose,
   onCreated,
 }: CreateContactModalProps) {
+  const toast = useToast();
+
   const [form, setForm] = useState<CreateForm>({
     name: "",
     email: "",
@@ -72,7 +75,10 @@ export default function CreateContactModal({
       });
 
       onCreated({ ...created, avatarColor: getAvatarColor(created.id) });
+      toast("success", "Contact créé avec succès");
       onClose();
+    } catch {
+      toast("error", "Impossible de créer le contact");
     } finally {
       setSaving(false);
     }

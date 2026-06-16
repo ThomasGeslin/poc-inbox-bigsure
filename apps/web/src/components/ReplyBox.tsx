@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import type { Channel, Message } from "../types";
 import { sendMessage } from "../lib/api";
+import { useToast } from "./useToast";
 
 type ReplyChannel = Exclude<Channel, "call">;
 
@@ -38,6 +39,8 @@ export default function ReplyBox({
   messages,
   onSent,
 }: ReplyBoxProps) {
+  const toast = useToast();
+
   const [channel, setChannel] = useState<ReplyChannel>("mail");
   const [body, setBody] = useState("");
   const [subject, setSubject] = useState("");
@@ -69,6 +72,10 @@ export default function ReplyBox({
         onSent(msg);
         setBody("");
         setSubject("");
+        toast("success", "Message envoyé");
+      })
+      .catch(() => {
+        toast("error", "Impossible d'envoyer le message");
       })
       .finally(() => setSending(false));
   }
