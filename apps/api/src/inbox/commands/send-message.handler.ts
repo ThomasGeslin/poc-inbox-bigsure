@@ -1,13 +1,9 @@
 import { CommandHandler, ICommandHandler } from '@nestjs/cqrs';
-import {
-  NotFoundException,
-  InternalServerErrorException,
-  Logger,
-} from '@nestjs/common';
+import { BadRequestException, NotFoundException, Logger } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { TwilioService } from '../services/twilio.service';
 import { SendMessageCommand } from './send-message.command';
-import { Message } from '@prisma/client';
+import { Message, Prisma } from '@prisma/client';
 
 @CommandHandler(SendMessageCommand)
 export class SendMessageHandler implements ICommandHandler<SendMessageCommand> {
@@ -31,17 +27,16 @@ export class SendMessageHandler implements ICommandHandler<SendMessageCommand> {
     }
 
     // Send via Twilio BEFORE persisting (fail-fast)
+    let twilioSid: string | undefined;
     if (channel === 'SMS' || channel === 'WHATSAPP') {
       const phone = conversation.contact.phone;
       if (!phone) {
-        throw new InternalServerErrorException(
-          `Contact ${conversation.contactId} has no phone number`,
-        );
+        throw new BadRequestException('Contact has no phone number');
       }
 
       try {
         if (channel === 'SMS') {
-          await this.twilioService.sendSms(phone, content);
+          twilioSid = await this.twilioService.sendSms(phone, content);
         } else {
           await this.twilioService.sendWhatsApp(phone, content);
         }
@@ -52,7 +47,11 @@ export class SendMessageHandler implements ICommandHandler<SendMessageCommand> {
       }
     }
 
-    const meta = subject ? { subject } : undefined;
+    const meta: Record<string, unknown> | undefined = {
+      ...(subject ? { subject } : {}),
+      ...(twilioSid ? { twilioSid } : {}),
+    };
+    const metaValue = Object.keys(meta).length > 0 ? meta : undefined;
 
     const [message] = await this.prisma.$transaction([
       this.prisma.message.create({
@@ -61,7 +60,7 @@ export class SendMessageHandler implements ICommandHandler<SendMessageCommand> {
           channel,
           direction: 'OUTBOUND',
           content,
-          meta,
+          meta: metaValue as Prisma.InputJsonValue | undefined,
         },
       }),
       this.prisma.conversation.update({

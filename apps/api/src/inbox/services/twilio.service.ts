@@ -1,10 +1,15 @@
 import {
+  BadRequestException,
   Injectable,
   InternalServerErrorException,
   Logger,
 } from '@nestjs/common';
 import twilio, { Twilio } from 'twilio';
 import { validateRequest } from 'twilio';
+import {
+  isValidPhoneNumber,
+  parsePhoneNumberWithError,
+} from 'libphonenumber-js';
 
 @Injectable()
 export class TwilioService {
@@ -24,7 +29,12 @@ export class TwilioService {
     this.client = twilio(accountSid, authToken);
   }
 
-  async sendSms(to: string, body: string): Promise<void> {
+  async sendSms(to: string, body: string): Promise<string> {
+    const normalizedTo = this.normalizeE164(to);
+    if (!normalizedTo) {
+      throw new BadRequestException(`Invalid phone number: ${to}`);
+    }
+
     const from = process.env.TWILIO_SMS_NUMBER;
     if (!from) {
       throw new InternalServerErrorException(
@@ -33,7 +43,12 @@ export class TwilioService {
     }
 
     try {
-      await this.client.messages.create({ to, from, body });
+      const result = await this.client.messages.create({
+        to: normalizedTo,
+        from,
+        body,
+      });
+      return result.sid;
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       this.logger.error(`Twilio SMS send failed: ${msg}`);
@@ -43,7 +58,25 @@ export class TwilioService {
     }
   }
 
-  async sendWhatsApp(to: string, body: string): Promise<void> {
+  normalizeE164(phone: string): string | null {
+    try {
+      if (isValidPhoneNumber(phone)) {
+        return parsePhoneNumberWithError(phone).format('E.164');
+      }
+
+      const parsed = parsePhoneNumberWithError(phone, 'FR');
+
+      if (parsed.isValid()) {
+        return parsed.format('E.164');
+      }
+
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  async sendWhatsApp(to: string, body: string): Promise<string> {
     const fromRaw = process.env.TWILIO_WHATSAPP_NUMBER;
     if (!fromRaw) {
       throw new InternalServerErrorException(
@@ -57,11 +90,17 @@ export class TwilioService {
     const toFormatted = to.startsWith('whatsapp:') ? to : `whatsapp:${to}`;
 
     try {
-      await this.client.messages.create({
+      const result = await this.client.messages.create({
         to: toFormatted,
         from,
         body,
       });
+
+      this.logger.log(
+        `WhatsApp sent OK — sid=${result.sid} status=${result.status} to=${toFormatted}`,
+      );
+
+      return result.sid;
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       this.logger.error(`Twilio WhatsApp send failed: ${msg}`);

@@ -103,6 +103,23 @@ export default function ReplyBox({ conversationId, onSent }: ReplyBoxProps) {
           }}
         />
 
+        {/* SMS character counter */}
+        {channel === "sms" && (
+          <div
+            className={`text-xs text-right mt-1 ${
+              body.length > 160
+                ? "text-red-500"
+                : body.length >= 140
+                  ? "text-orange-400"
+                  : "text-gray-400"
+            }`}
+          >
+            {body.length > 160
+              ? `${body.length}/160 — Envoi en ${Math.ceil(body.length / 160)} segments`
+              : `${body.length}/160`}
+          </div>
+        )}
+
         {/* Actions bar */}
         <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-100">
           <button
