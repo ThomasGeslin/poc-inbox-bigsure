@@ -110,11 +110,14 @@ export default function MessageBubble({ message }: MessageBubbleProps) {
           className={`flex items-center gap-1 mt-1.5 ${isOut ? "justify-end" : "justify-between"}`}
         >
           {!isOut && cfg && <cfg.Icon size={11} className={cfg.cls} />}
+
           <span
             className={`text-xs ${isOut ? "text-indigo-200" : "text-gray-400"}`}
           >
             {formatTime(message.timestamp)}
           </span>
+
+          {isOut && cfg && <cfg.Icon size={11} className="text-indigo-300" />}
         </div>
       </div>
     </div>

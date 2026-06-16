@@ -28,7 +28,8 @@ export interface Conversation {
   contactId: string;
   subject: string;
   status: ConversationStatus;
-  channel: Channel;
+  channel: Channel; // last channel used
+  channels: Channel[]; // all distinct channels in this conversation
   unreadCount: number;
   lastMessageAt: string;
   lastMessage: string;

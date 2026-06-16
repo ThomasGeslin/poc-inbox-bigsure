@@ -55,7 +55,9 @@ export default function ConversationItem({
           </span>
 
           <div className="flex items-center gap-1 flex-shrink-0 ml-2">
-            <ChannelIcon channel={conversation.channel} size={11} />
+            {(conversation.channels ?? [conversation.channel]).map((ch) => (
+              <ChannelIcon key={ch} channel={ch} size={11} />
+            ))}
             <span className="text-xs text-gray-400">
               {formatTime(conversation.lastMessageAt)}
             </span>

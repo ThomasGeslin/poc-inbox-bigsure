@@ -123,7 +123,7 @@ export class SendMessageHandler implements ICommandHandler<SendMessageCommand> {
       }),
       this.prisma.conversation.update({
         where: { id: conversationId },
-        data: { lastMessageAt: new Date(), unreadCount: 0 },
+        data: { lastMessageAt: new Date(), unreadCount: 0, channel },
       }),
     ]);
 

@@ -70,6 +70,11 @@ function App() {
               lastMessageAt: message.timestamp,
               lastMessage: message.content,
               unreadCount: 0,
+              channels: conv.channels
+                ? conv.channels.includes(message.channel)
+                  ? conv.channels
+                  : [...conv.channels, message.channel]
+                : [message.channel],
             }
           : conv,
       ),
@@ -79,7 +84,11 @@ function App() {
   const contacts: Contact[] = conversations.map((c) => c.contact);
 
   const filtered = conversations.filter((conv) => {
-    if (filterChannel !== "all" && conv.channel !== filterChannel) return false;
+    if (
+      filterChannel !== "all" &&
+      !(conv.channels ?? [conv.channel]).includes(filterChannel)
+    )
+      return false;
     if (filterStatus === "treated" && conv.status !== "treated") return false;
     if (filterStatus === "pending" && conv.status === "treated") return false;
     return true;

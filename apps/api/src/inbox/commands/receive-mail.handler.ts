@@ -35,7 +35,7 @@ export class ReceiveMailHandler implements ICommandHandler<ReceiveMailCommand> {
     );
 
     if (!conversation) {
-      // Try to find open MAIL conversation with matching subject (strip Re:/Fwd: prefixes)
+      // Try to find open conversation with matching subject (strip Re:/Fwd: prefixes)
       const normalizedSubject = subject
         .replace(/^(re|fwd?)\s*:\s*/i, '')
         .trim();
@@ -43,7 +43,6 @@ export class ReceiveMailHandler implements ICommandHandler<ReceiveMailCommand> {
       conversation = await this.prisma.conversation.findFirst({
         where: {
           contactId: contact.id,
-          channel: 'MAIL',
           status: { not: 'TRAITE' },
           subject: { contains: normalizedSubject, mode: 'insensitive' },
         },
@@ -52,11 +51,10 @@ export class ReceiveMailHandler implements ICommandHandler<ReceiveMailCommand> {
     }
 
     if (!conversation) {
-      // Fallback: reuse the most recent open MAIL conversation for this contact
+      // Fallback: reuse the most recent open conversation for this contact
       conversation = await this.prisma.conversation.findFirst({
         where: {
           contactId: contact.id,
-          channel: 'MAIL',
           status: { not: 'TRAITE' },
         },
         orderBy: { lastMessageAt: 'desc' },
@@ -94,6 +92,7 @@ export class ReceiveMailHandler implements ICommandHandler<ReceiveMailCommand> {
         data: {
           lastMessageAt: new Date(),
           unreadCount: { increment: 1 },
+          channel: 'MAIL', // track last channel used
         },
       }),
     ]);

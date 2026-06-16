@@ -30,11 +30,10 @@ export class ReceiveInboundMessageHandler implements ICommandHandler<ReceiveInbo
       });
     }
 
-    // Find or create an open Conversation for this contact + channel
+    // Find or create a single open Conversation for this contact (all channels merged)
     let conversation = await this.prisma.conversation.findFirst({
       where: {
         contactId: contact.id,
-        channel,
         status: { not: 'TRAITE' },
       },
       orderBy: { lastMessageAt: 'desc' },
@@ -45,7 +44,7 @@ export class ReceiveInboundMessageHandler implements ICommandHandler<ReceiveInbo
         data: {
           contactId: contact.id,
           channel,
-          subject: `${channel} inbound from ${phone}`,
+          subject: `Conversation with ${phone}`,
         },
       });
     }
@@ -68,6 +67,7 @@ export class ReceiveInboundMessageHandler implements ICommandHandler<ReceiveInbo
         data: {
           lastMessageAt: new Date(),
           unreadCount: { increment: 1 },
+          channel, // track last channel used
         },
       }),
     ]);
