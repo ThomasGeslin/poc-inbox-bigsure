@@ -109,3 +109,14 @@ export async function updateContact(
 
   return res.json();
 }
+
+/** Mark a conversation as read (reset unread count to 0) */
+export async function markConversationAsRead(
+  conversationId: string,
+): Promise<void> {
+  const res = await fetch(`${BASE_URL}/conversations/${conversationId}/read`, {
+    method: "PATCH",
+  });
+
+  if (!res.ok) throw new Error("Failed to mark conversation as read");
+}

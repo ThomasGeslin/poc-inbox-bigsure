@@ -3,6 +3,7 @@ import { Inbox, Loader2 } from "lucide-react";
 import {
   fetchConversations,
   fetchMessages,
+  markConversationAsRead,
   type ConversationWithContact,
 } from "./lib/api";
 import ConversationList from "./components/ConversationList";
@@ -48,6 +49,16 @@ function App() {
   function handleSelect(id: string) {
     setActiveMessages([]);
     setActiveId(id);
+
+    // Mark as read optimistically, then persist to backend
+    setConversations((prev) =>
+      prev.map((conv) => (conv.id === id ? { ...conv, unreadCount: 0 } : conv)),
+    );
+
+    markConversationAsRead(id).catch(() => {
+      // Revert on failure by re-fetching
+      fetchConversations().then(setConversations);
+    });
   }
 
   /** Handle contact created */

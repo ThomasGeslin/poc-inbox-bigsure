@@ -13,6 +13,7 @@ import { ReceiveMailHandler } from './commands/receive-mail.handler';
 import { UpdateConversationStatusHandler } from './commands/update-conversation-status.handler';
 import { UpdateContactHandler } from './commands/update-contact.handler';
 import { CreateContactHandler } from './commands/create-contact.handler';
+import { MarkAsReadHandler } from './commands/mark-as-read.handler';
 
 // Query handlers
 import { GetConversationsHandler } from './queries/get-conversations.handler';
@@ -29,6 +30,7 @@ const CommandHandlers = [
   UpdateConversationStatusHandler,
   UpdateContactHandler,
   CreateContactHandler,
+  MarkAsReadHandler,
 ];
 
 const QueryHandlers = [GetConversationsHandler, GetConversationMessagesHandler];

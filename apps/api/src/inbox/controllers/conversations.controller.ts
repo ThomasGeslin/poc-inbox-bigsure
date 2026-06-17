@@ -11,6 +11,7 @@ import {
 import { CommandBus, QueryBus } from '@nestjs/cqrs';
 import { SendMessageCommand } from '../commands/send-message.command';
 import { UpdateConversationStatusCommand } from '../commands/update-conversation-status.command';
+import { MarkAsReadCommand } from '../commands/mark-as-read.command';
 import { GetConversationsQuery } from '../queries/get-conversations.query';
 import { GetConversationMessagesQuery } from '../queries/get-conversation-messages.query';
 import { SendMessageDto } from '../dto/send-message.dto';
@@ -74,5 +75,11 @@ export class ConversationsController {
     return this.commandBus.execute(
       new UpdateConversationStatusCommand(id, status),
     );
+  }
+
+  @Patch(':id/read')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  markAsRead(@Param('id') id: string) {
+    return this.commandBus.execute(new MarkAsReadCommand(id));
   }
 }
