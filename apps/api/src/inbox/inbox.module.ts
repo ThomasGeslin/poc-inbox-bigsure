@@ -5,6 +5,7 @@ import { CqrsModule } from '@nestjs/cqrs';
 import { ConversationsController } from './controllers/conversations.controller';
 import { WebhooksController } from './controllers/webhooks.controller';
 import { ContactsController } from './controllers/contacts.controller';
+import { CallsController } from './controllers/calls.controller';
 
 // Command handlers
 import { SendMessageHandler } from './commands/send-message.handler';
@@ -14,6 +15,7 @@ import { UpdateConversationStatusHandler } from './commands/update-conversation-
 import { UpdateContactHandler } from './commands/update-contact.handler';
 import { CreateContactHandler } from './commands/create-contact.handler';
 import { MarkAsReadHandler } from './commands/mark-as-read.handler';
+import { LogCallHandler } from './commands/log-call.handler';
 
 // Query handlers
 import { GetConversationsHandler } from './queries/get-conversations.handler';
@@ -31,6 +33,7 @@ const CommandHandlers = [
   UpdateContactHandler,
   CreateContactHandler,
   MarkAsReadHandler,
+  LogCallHandler,
 ];
 
 const QueryHandlers = [GetConversationsHandler, GetConversationMessagesHandler];
@@ -41,6 +44,7 @@ const QueryHandlers = [GetConversationsHandler, GetConversationMessagesHandler];
     ConversationsController,
     WebhooksController,
     ContactsController,
+    CallsController,
   ],
   providers: [
     ...CommandHandlers,

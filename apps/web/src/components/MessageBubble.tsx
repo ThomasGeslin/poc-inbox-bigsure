@@ -2,12 +2,14 @@ import {
   Mail,
   MessageCircle,
   MessageSquare,
+  PhoneIncoming,
   PhoneMissed,
   PhoneOutgoing,
-  PhoneCall,
+  PhoneOff,
+  Play,
 } from "lucide-react";
 import type { Message } from "../types";
-import { formatTime, formatDuration } from "../utils/helpers";
+import { formatTime } from "../utils/helpers";
 
 interface MessageBubbleProps {
   message: Message;
@@ -15,26 +17,32 @@ interface MessageBubbleProps {
 
 // ── Call card (centered) ────────────────────────────────────────────────────
 function CallCard({ message }: { message: Message }) {
-  const { meta, direction, timestamp } = message;
-  const status = meta?.callStatus;
-  const duration = meta?.duration;
+  const { meta, direction, timestamp, content } = message;
+  const status = meta?.status;
+  const recordingUrl = meta?.recordingUrl;
 
-  let Icon = PhoneCall;
-  let label = "Appel entrant";
+  // Icon + colors based on direction × status
+  let Icon = PhoneIncoming;
   let colors = "border-green-200 bg-green-50";
   let iconCls = "text-green-500";
 
-  if (status === "missed") {
+  if (direction === "inbound" && status !== "completed") {
+    // Missed inbound (no-answer / busy / failed)
     Icon = PhoneMissed;
-    label = "Appel manqué";
     colors = "border-red-200 bg-red-50";
     iconCls = "text-red-500";
-  } else if (status === "outbound" || direction === "outbound") {
+  } else if (direction === "outbound" && status === "completed") {
+    // Answered outbound
     Icon = PhoneOutgoing;
-    label = "Appel sortant";
-    colors = "border-indigo-200 bg-indigo-50";
-    iconCls = "text-indigo-500";
+    colors = "border-blue-200 bg-blue-50";
+    iconCls = "text-blue-500";
+  } else if (direction === "outbound") {
+    // Outbound not answered
+    Icon = PhoneOff;
+    colors = "border-orange-200 bg-orange-50";
+    iconCls = "text-orange-500";
   }
+  // else: inbound completed → PhoneIncoming green (default)
 
   return (
     <div className="flex justify-center my-3">
@@ -44,15 +52,21 @@ function CallCard({ message }: { message: Message }) {
         <Icon size={15} className={iconCls} />
 
         <div>
-          <p className="text-xs font-semibold text-gray-700">{label}</p>
-          {duration != null && (
-            <p className="text-xs text-gray-500">{formatDuration(duration)}</p>
-          )}
+          <p className="text-xs font-semibold text-gray-700">{content}</p>
+          <p className="text-xs text-gray-400">{formatTime(timestamp)}</p>
         </div>
 
-        <span className="text-xs text-gray-400 ml-1">
-          {formatTime(timestamp)}
-        </span>
+        {recordingUrl && (
+          <a
+            href={recordingUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1 ml-2 text-xs text-indigo-600 hover:text-indigo-800 transition-colors"
+          >
+            <Play size={12} />
+            Écouter
+          </a>
+        )}
       </div>
     </div>
   );

@@ -9,6 +9,13 @@ export type ConversationStatus =
 
 export type CallStatus = "missed" | "answered" | "outbound";
 
+export type CallLogStatus =
+  | "completed"
+  | "no-answer"
+  | "busy"
+  | "failed"
+  | "voicemail";
+
 export type FilterChannel = "all" | Channel;
 
 export type FilterStatus = "pending" | "treated";
@@ -36,13 +43,24 @@ export interface Conversation {
 }
 
 export interface MessageMeta {
+  // ── Call-specific (channel === 'call') ─────────────────────────────────
+  callSid?: string;
+  status?: CallLogStatus;
   duration?: number; // seconds
-  callStatus?: CallStatus;
+  from?: string; // E.164
+  to?: string; // E.164
+  recordingUrl?: string;
+  // ── Mail-specific ─────────────────────────────────────────────────────
   subject?: string;
-  // Mail threading
   messageId?: string;
   inReplyTo?: string;
   references?: string[];
+  // ── Twilio SMS / WhatsApp ─────────────────────────────────────────────
+  twilioSid?: string;
+  accountSid?: string;
+  numMedia?: string;
+  rawFrom?: string;
+  rawTo?: string;
 }
 
 export interface Message {

@@ -75,7 +75,9 @@ export default function ConversationItem({
             hasUnread ? "text-gray-700 font-medium" : "text-gray-400"
           }`}
         >
-          {conversation.lastMessage}
+          {conversation.channel === "call"
+            ? `📞 ${conversation.lastMessage}`
+            : conversation.lastMessage}
         </p>
 
         {/* Row 4: badge + unread count */}
