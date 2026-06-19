@@ -71,6 +71,21 @@ export function getAvatarColor(id: string): string {
   return AVATAR_COLORS[hash % AVATAR_COLORS.length];
 }
 
+export function stripHtml(html: string): string {
+  return html
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#\d+;/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 /** "SM" from "Sophie Martin" */
 export function getInitials(name: string): string {
   return name

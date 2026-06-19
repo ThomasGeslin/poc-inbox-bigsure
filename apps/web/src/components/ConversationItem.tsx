@@ -2,7 +2,7 @@ import type { Contact, Conversation } from "../types";
 import Avatar from "./Avatar";
 import StatusBadge from "./StatusBadge";
 import ChannelIcon from "./ChannelIcon";
-import { formatTime } from "../utils/helpers";
+import { formatTime, stripHtml } from "../utils/helpers";
 
 interface ConversationItemProps {
   conversation: Conversation;
@@ -66,7 +66,7 @@ export default function ConversationItem({
 
         {/* Row 2: subject */}
         <p className="text-xs text-gray-500 truncate mb-0.5">
-          {conversation.subject}
+          {stripHtml(conversation.subject)}
         </p>
 
         {/* Row 3: last message */}
@@ -76,8 +76,8 @@ export default function ConversationItem({
           }`}
         >
           {conversation.channel === "call"
-            ? `📞 ${conversation.lastMessage}`
-            : conversation.lastMessage}
+            ? `📞 ${stripHtml(conversation.lastMessage)}`
+            : stripHtml(conversation.lastMessage)}
         </p>
 
         {/* Row 4: badge + unread count */}
