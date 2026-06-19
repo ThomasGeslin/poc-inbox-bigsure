@@ -4,6 +4,7 @@ import type { Contact } from "../types";
 import { createContact } from "../lib/api";
 import { getAvatarColor } from "../utils/helpers";
 import { useToast } from "./useToast";
+import PhoneInputField from "./PhoneInputField";
 
 interface CreateContactModalProps {
   onClose: () => void;
@@ -165,20 +166,28 @@ export default function CreateContactModal({
                   {required && <span className="text-red-400 ml-0.5">*</span>}
                 </label>
 
-                <div className="relative">
-                  <div className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none">
-                    <Icon size={14} />
-                  </div>
-
-                  <input
-                    ref={i === 0 ? firstInputRef : undefined}
-                    type={type ?? "text"}
-                    value={form[key]}
-                    onChange={(e) => handleChange(key, e.target.value)}
-                    placeholder={placeholder}
-                    className="w-full pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-transparent placeholder:text-gray-300"
+                {key === "phone" ? (
+                  <PhoneInputField
+                    value={form.phone}
+                    onChange={(v) => handleChange("phone", v)}
+                    variant="create"
                   />
-                </div>
+                ) : (
+                  <div className="relative">
+                    <div className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none">
+                      <Icon size={14} />
+                    </div>
+
+                    <input
+                      ref={i === 0 ? firstInputRef : undefined}
+                      type={type ?? "text"}
+                      value={form[key]}
+                      onChange={(e) => handleChange(key, e.target.value)}
+                      placeholder={placeholder}
+                      className="w-full pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-transparent placeholder:text-gray-300"
+                    />
+                  </div>
+                )}
               </div>
             ),
           )}

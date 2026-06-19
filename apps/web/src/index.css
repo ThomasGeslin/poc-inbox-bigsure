@@ -1,1 +1,8 @@
 @import "tailwindcss";
+
+/* react-phone-number-input — only need the flex layout; custom dropdown handles the rest */
+.phone-input-root .PhoneInput {
+  display: flex;
+  align-items: center;
+  width: 100%;
+}

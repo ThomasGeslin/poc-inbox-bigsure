@@ -4,6 +4,7 @@ import type { Contact } from "../types";
 import { updateContact } from "../lib/api";
 import Avatar from "./Avatar";
 import { useToast } from "./useToast";
+import PhoneInputField from "./PhoneInputField";
 
 interface EditContactModalProps {
   contact: Contact;
@@ -149,20 +150,28 @@ export default function EditContactModal({
                 {label}
               </label>
 
-              <div className="relative">
-                <div className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none">
-                  <Icon size={14} />
-                </div>
-
-                <input
-                  ref={i === 0 ? firstInputRef : undefined}
-                  type={type ?? "text"}
-                  value={form[key]}
-                  onChange={(e) => handleChange(key, e.target.value)}
-                  placeholder={placeholder}
-                  className="w-full pl-9 pr-3 py-2 text-sm text-gray-800 bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:border-indigo-400 focus:bg-white transition-colors"
+              {key === "phone" ? (
+                <PhoneInputField
+                  value={form.phone}
+                  onChange={(v) => handleChange("phone", v)}
+                  variant="edit"
                 />
-              </div>
+              ) : (
+                <div className="relative">
+                  <div className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none">
+                    <Icon size={14} />
+                  </div>
+
+                  <input
+                    ref={i === 0 ? firstInputRef : undefined}
+                    type={type ?? "text"}
+                    value={form[key]}
+                    onChange={(e) => handleChange(key, e.target.value)}
+                    placeholder={placeholder}
+                    className="w-full pl-9 pr-3 py-2 text-sm text-gray-800 bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:border-indigo-400 focus:bg-white transition-colors"
+                  />
+                </div>
+              )}
             </div>
           ))}
         </div>

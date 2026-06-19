@@ -2,24 +2,7 @@ import { CommandHandler, ICommandHandler } from '@nestjs/cqrs';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { CreateContactCommand } from './create-contact.command';
 import { Contact } from '@prisma/client';
-import {
-  parsePhoneNumberWithError,
-  isValidPhoneNumber,
-} from 'libphonenumber-js';
-
-function normalizePhone(phone: string | undefined): string | undefined {
-  if (!phone) return phone;
-  try {
-    if (isValidPhoneNumber(phone))
-      return parsePhoneNumberWithError(phone).format('E.164');
-
-    const parsed = parsePhoneNumberWithError(phone, 'FR');
-    if (parsed.isValid()) return parsed.format('E.164');
-  } catch {
-    console.error(`Failed to normalize phone number: ${phone}`);
-  }
-  return phone;
-}
+import { normalizePhone } from '../utils/phone.utils';
 
 @CommandHandler(CreateContactCommand)
 export class CreateContactHandler implements ICommandHandler<CreateContactCommand> {
