@@ -31,12 +31,14 @@ const PLACEHOLDER: Record<ReplyChannel, string> = {
 interface ReplyBoxProps {
   conversationId: string;
   messages: Message[];
+  contact: { email: string; phone: string };
   onSent: (message: Message) => void;
 }
 
 export default function ReplyBox({
   conversationId,
   messages,
+  contact,
   onSent,
 }: ReplyBoxProps) {
   const toast = useToast();
@@ -50,7 +52,12 @@ export default function ReplyBox({
   const hasPriorMail = messages.some((m) => m.channel === "mail");
   const showSubject = channel === "mail" && !hasPriorMail;
 
-  const canSend = body.trim().length > 0 && !sending;
+  const hasPhone = contact.phone.trim().length > 0;
+  const hasEmail = contact.email.trim().length > 0;
+  const channelReady =
+    (channel === "mail" && hasEmail) ||
+    ((channel === "sms" || channel === "whatsapp") && hasPhone);
+  const canSend = body.trim().length > 0 && !sending && channelReady;
 
   function handleSend() {
     if (!canSend) return;

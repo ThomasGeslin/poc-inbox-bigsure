@@ -121,6 +121,7 @@ export default function MessageThread({
       <ReplyBox
         conversationId={conversation.id}
         messages={messages}
+        contact={contact}
         onSent={onSent}
       />
     </main>
