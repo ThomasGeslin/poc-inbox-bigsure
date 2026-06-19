@@ -78,8 +78,21 @@ export default function CreateContactModal({
       onCreated({ ...created, avatarColor: getAvatarColor(created.id) });
       toast("success", "Contact créé avec succès");
       onClose();
-    } catch {
-      toast("error", "Impossible de créer le contact");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "";
+      let userMessage = "Impossible de créer le contact";
+      if (msg.includes("not found")) {
+        userMessage = "Le contact est introuvable.";
+      } else if (
+        msg.toLowerCase().includes("unique") ||
+        msg.toLowerCase().includes("already exists")
+      ) {
+        userMessage = "Un contact avec cet e-mail ou ce téléphone existe déjà.";
+      } else if (msg.includes("validation") || msg.includes("invalid")) {
+        userMessage =
+          "Les informations saisies sont invalides. Vérifiez les champs.";
+      }
+      toast("error", userMessage);
     } finally {
       setSaving(false);
     }

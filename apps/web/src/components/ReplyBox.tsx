@@ -74,8 +74,20 @@ export default function ReplyBox({
         setSubject("");
         toast("success", "Message envoyé");
       })
-      .catch(() => {
-        toast("error", "Impossible d'envoyer le message");
+      .catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : "";
+        let userMessage = "Impossible d'envoyer le message";
+        if (msg.includes("no email address")) {
+          userMessage =
+            "Ce contact n'a pas d'adresse e-mail. Ajoutez-en une avant d'envoyer un mail.";
+        } else if (msg.includes("no phone number")) {
+          userMessage =
+            "Ce contact n'a pas de numéro de téléphone. Ajoutez-en un avant d'envoyer un SMS ou WhatsApp.";
+        } else if (msg.includes("Invalid phone number")) {
+          userMessage =
+            "Le numéro de téléphone du contact est invalide. Vérifiez le format (ex. +33612345678).";
+        }
+        toast("error", userMessage);
       })
       .finally(() => setSending(false));
   }

@@ -63,8 +63,22 @@ export default function EditContactModal({
       onSaved({ ...updated, avatarColor: contact.avatarColor });
       toast("success", "Contact mis à jour");
       onClose();
-    } catch {
-      toast("error", "Impossible de mettre à jour le contact");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "";
+      let userMessage = "Impossible de mettre à jour le contact";
+      if (msg.includes("not found")) {
+        userMessage =
+          "Ce contact est introuvable. Il a peut-être été supprimé.";
+      } else if (
+        msg.toLowerCase().includes("unique") ||
+        msg.toLowerCase().includes("already exists")
+      ) {
+        userMessage = "Un contact avec cet e-mail ou ce téléphone existe déjà.";
+      } else if (msg.includes("validation") || msg.includes("invalid")) {
+        userMessage =
+          "Les informations saisies sont invalides. Vérifiez les champs.";
+      }
+      toast("error", userMessage);
     } finally {
       setSaving(false);
     }

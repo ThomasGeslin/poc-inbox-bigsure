@@ -58,7 +58,12 @@ export async function sendMessage(
     },
   );
 
-  if (!res.ok) throw new Error("Failed to send message");
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    const apiMessage =
+      body && typeof body.message === "string" ? body.message : null;
+    throw new Error(apiMessage ?? "Failed to send message");
+  }
 
   return res.json();
 }
@@ -81,7 +86,12 @@ export async function createContact(
     body: JSON.stringify(payload),
   });
 
-  if (!res.ok) throw new Error("Failed to create contact");
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    const apiMessage =
+      body && typeof body.message === "string" ? body.message : null;
+    throw new Error(apiMessage ?? "Failed to create contact");
+  }
 
   return res.json();
 }
@@ -105,7 +115,12 @@ export async function updateContact(
     body: JSON.stringify(payload),
   });
 
-  if (!res.ok) throw new Error("Failed to update contact");
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    const apiMessage =
+      body && typeof body.message === "string" ? body.message : null;
+    throw new Error(apiMessage ?? "Failed to update contact");
+  }
 
   return res.json();
 }
