@@ -3,6 +3,10 @@ import { Logger } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { ReceiveInboundMessageCommand } from './receive-inbound-message.command';
 import { Message, Prisma } from '@prisma/client';
+import {
+  parsePhoneNumberWithError,
+  isValidPhoneNumber,
+} from 'libphonenumber-js';
 
 @CommandHandler(ReceiveInboundMessageCommand)
 export class ReceiveInboundMessageHandler implements ICommandHandler<ReceiveInboundMessageCommand> {
@@ -13,9 +17,24 @@ export class ReceiveInboundMessageHandler implements ICommandHandler<ReceiveInbo
   async execute(command: ReceiveInboundMessageCommand): Promise<Message> {
     const { phone, channel, content, meta } = command;
 
-    // Find or create Contact by normalized phone number
+    // Build candidate phone variants to match contacts stored with local or E.164 format
+    const phoneVariants: string[] = [phone];
+
+    try {
+      if (isValidPhoneNumber(phone)) {
+        const national = parsePhoneNumberWithError(phone)
+          .formatNational()
+          .replace(/\D/g, '');
+
+        if (national && national !== phone) phoneVariants.push(national);
+      }
+    } catch {
+      this.logger.error(`Failed to normalize phone number: ${phone}`);
+    }
+
+    // Find or create Contact by normalized phone number (also match local-format variants)
     let contact = await this.prisma.contact.findFirst({
-      where: { phone },
+      where: { phone: { in: phoneVariants } },
     });
 
     if (!contact) {
@@ -27,6 +46,12 @@ export class ReceiveInboundMessageHandler implements ICommandHandler<ReceiveInbo
           name: phone,
           phone,
         },
+      });
+    } else if (contact.phone !== phone) {
+      // Self-heal: upgrade stored local-format number to E.164
+      contact = await this.prisma.contact.update({
+        where: { id: contact.id },
+        data: { phone },
       });
     }
 
