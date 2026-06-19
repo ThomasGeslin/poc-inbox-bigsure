@@ -188,6 +188,7 @@ export class WebhooksController {
       // Format Cloudmailin JSON Normalized
       envelope?: { from?: string; to?: string };
       headers?: {
+        from?: string;
         subject?: string;
         message_id?: string;
         in_reply_to?: string;
@@ -214,6 +215,11 @@ export class WebhooksController {
     if (!from) {
       throw new BadRequestException('Missing required field: from');
     }
+
+    // Extract display name from the full From header (e.g. "John Doe <john@example.com>")
+    const senderName = this.extractEmailDisplayName(
+      body.headers?.from ?? body.from ?? '',
+    );
 
     const subject = body.subject ?? body.headers?.subject ?? '(sans objet)';
 
@@ -244,6 +250,7 @@ export class WebhooksController {
         messageId,
         inReplyTo,
         references,
+        senderName,
       ),
     );
 
@@ -385,6 +392,12 @@ export class WebhooksController {
   /********************/
   /** Utils functions */
   /********************/
+  private extractEmailDisplayName(raw: string): string | undefined {
+    const match = raw.match(/^"?([^"<]+?)"?\s*<[^>]+>$/);
+    const name = match?.[1]?.trim();
+    return name || undefined;
+  }
+
   private normalizePhone(raw: string): string | null {
     try {
       if (isValidPhoneNumber(raw)) {

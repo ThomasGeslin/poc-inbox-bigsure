@@ -11,8 +11,15 @@ export class ReceiveMailHandler implements ICommandHandler<ReceiveMailCommand> {
   constructor(private readonly prisma: PrismaService) {}
 
   async execute(command: ReceiveMailCommand): Promise<Message> {
-    const { from, subject, content, messageId, inReplyTo, references } =
-      command;
+    const {
+      from,
+      subject,
+      content,
+      messageId,
+      inReplyTo,
+      references,
+      senderName,
+    } = command;
 
     // ── 1. Find or create Contact by email ───────────────────────────────
     let contact = await this.prisma.contact.findFirst({
@@ -21,7 +28,8 @@ export class ReceiveMailHandler implements ICommandHandler<ReceiveMailCommand> {
 
     if (!contact) {
       this.logger.log(`No contact found for ${from}, creating minimal contact`);
-      const name = from.split('@')[0] ?? from;
+
+      const name = senderName ?? from.split('@')[0] ?? from;
       contact = await this.prisma.contact.create({
         data: { name, email: from },
       });

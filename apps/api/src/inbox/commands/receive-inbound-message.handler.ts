@@ -41,9 +41,17 @@ export class ReceiveInboundMessageHandler implements ICommandHandler<ReceiveInbo
       this.logger.log(
         `No contact found for ${phone}, creating minimal contact`,
       );
+
+      const profileName =
+        channel === 'WHATSAPP' &&
+        typeof meta?.profileName === 'string' &&
+        meta.profileName
+          ? meta.profileName
+          : undefined;
+
       contact = await this.prisma.contact.create({
         data: {
-          name: phone,
+          name: profileName ?? phone,
           phone,
         },
       });

@@ -6,5 +6,6 @@ export class ReceiveMailCommand {
     public readonly messageId?: string,
     public readonly inReplyTo?: string,
     public readonly references?: string[],
+    public readonly senderName?: string,
   ) {}
 }
