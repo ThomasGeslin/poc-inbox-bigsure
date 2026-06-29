@@ -14,11 +14,13 @@ import { FilesInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { CommandBus, QueryBus } from '@nestjs/cqrs';
 import { SendMessageCommand } from '../commands/send-message.command';
+import { StartConversationCommand } from '../commands/start-conversation.command';
 import { UpdateConversationStatusCommand } from '../commands/update-conversation-status.command';
 import { MarkAsReadCommand } from '../commands/mark-as-read.command';
 import { GetConversationsQuery } from '../queries/get-conversations.query';
 import { GetConversationMessagesQuery } from '../queries/get-conversation-messages.query';
 import { SendMessageDto } from '../dto/send-message.dto';
+import { StartConversationDto } from '../dto/start-conversation.dto';
 import { isAcceptedAttachmentType } from '../utils/attachment.utils';
 import { serializeMessage } from '../serializers/inbox.serializer';
 import { ConversationStatus, Channel, Message } from '@prisma/client';
@@ -48,6 +50,37 @@ export class ConversationsController {
   @Get()
   findAll() {
     return this.queryBus.execute(new GetConversationsQuery());
+  }
+
+  @Post()
+  @HttpCode(HttpStatus.CREATED)
+  @UseInterceptors(
+    FilesInterceptor('attachments', 5, {
+      storage: memoryStorage(),
+      limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB per file
+      fileFilter: (
+        _req: unknown,
+        file: Express.Multer.File,
+        cb: (err: Error | null, accept: boolean) => void,
+      ) => {
+        cb(null, isAcceptedAttachmentType(file.mimetype));
+      },
+    }),
+  )
+  startConversation(
+    @Body() dto: StartConversationDto,
+    @UploadedFiles() files?: Express.Multer.File[],
+  ) {
+    const channel = CHANNEL_INPUT_MAP[dto.channel];
+    return this.commandBus.execute(
+      new StartConversationCommand(
+        dto.contactId,
+        channel,
+        dto.content,
+        dto.subject,
+        files,
+      ),
+    );
   }
 
   @Get(':id/messages')

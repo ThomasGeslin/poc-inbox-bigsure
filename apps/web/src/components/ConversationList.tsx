@@ -7,6 +7,7 @@ import {
   MessageSquare,
   Phone,
   UserPlus,
+  PenSquare,
 } from "lucide-react";
 import type {
   Contact,
@@ -14,8 +15,10 @@ import type {
   FilterChannel,
   FilterStatus,
 } from "../types";
+import type { ConversationWithContact } from "../lib/api";
 import ConversationItem from "./ConversationItem";
 import CreateContactModal from "./CreateContactModal";
+import NewConversationModal from "./NewConversationModal";
 
 interface ConversationListProps {
   conversations: Conversation[];
@@ -28,6 +31,7 @@ interface ConversationListProps {
   filterStatus: FilterStatus;
   onFilterStatus: (s: FilterStatus) => void;
   onContactCreated?: (contact: Contact) => void;
+  onConversationStarted?: (conversation: ConversationWithContact) => void;
 }
 
 const CHANNEL_TABS: {
@@ -54,9 +58,11 @@ export default function ConversationList({
   filterStatus,
   onFilterStatus,
   onContactCreated,
+  onConversationStarted,
 }: ConversationListProps) {
   const [search, setSearch] = useState("");
   const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [newConvModalOpen, setNewConvModalOpen] = useState(false);
 
   const pendingCount = allConversations.filter(
     (conv) => conv.status !== "treated",
@@ -199,15 +205,24 @@ export default function ConversationList({
         )}
       </div>
 
-      {/* ── New contact button ────────────────────────────────────────────── */}
-      <div className="px-3 py-3 border-t border-gray-100">
+      {/* ── Footer actions ────────────────────────────────────────────────── */}
+      <div className="flex items-center gap-2 px-3 py-3 border-t border-gray-100">
+        <button
+          type="button"
+          onClick={() => setNewConvModalOpen(true)}
+          className="flex items-center justify-center gap-2 flex-1 py-2 text-xs font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors hover:cursor-pointer"
+        >
+          <PenSquare size={13} />
+          Nouvelle conversation
+        </button>
+
         <button
           type="button"
           onClick={() => setCreateModalOpen(true)}
-          className="flex items-center justify-center gap-2 w-full py-2 text-xs font-medium text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors hover:cursor-pointer"
+          title="Nouveau contact"
+          className="flex items-center justify-center gap-2 px-3 py-2 text-xs font-medium text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors hover:cursor-pointer"
         >
           <UserPlus size={13} />
-          Nouveau contact
         </button>
       </div>
 
@@ -217,6 +232,16 @@ export default function ConversationList({
           onCreated={(contact) => {
             onContactCreated?.(contact);
             setCreateModalOpen(false);
+          }}
+        />
+      )}
+
+      {newConvModalOpen && (
+        <NewConversationModal
+          onClose={() => setNewConvModalOpen(false)}
+          onStarted={(conversation) => {
+            onConversationStarted?.(conversation);
+            setNewConvModalOpen(false);
           }}
         />
       )}

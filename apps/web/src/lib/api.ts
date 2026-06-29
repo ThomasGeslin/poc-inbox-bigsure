@@ -67,23 +67,20 @@ export async function sendMessage(
     for (const file of payload.attachments) {
       form.append("attachments", file);
     }
-    res = await fetch(
-      `${BASE_URL}/conversations/${conversationId}/messages`,
-      { method: "POST", body: form },
-    );
+    res = await fetch(`${BASE_URL}/conversations/${conversationId}/messages`, {
+      method: "POST",
+      body: form,
+    });
   } else {
-    res = await fetch(
-      `${BASE_URL}/conversations/${conversationId}/messages`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          channel: payload.channel,
-          content: payload.content,
-          subject: payload.subject,
-        }),
-      },
-    );
+    res = await fetch(`${BASE_URL}/conversations/${conversationId}/messages`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        channel: payload.channel,
+        content: payload.content,
+        subject: payload.subject,
+      }),
+    });
   }
 
   if (!res.ok) {
@@ -94,6 +91,74 @@ export async function sendMessage(
   }
 
   return res.json();
+}
+
+/** Fetch all contacts (used to pick a recipient when starting a conversation) */
+export async function fetchContacts(): Promise<Contact[]> {
+  const res = await fetch(`${BASE_URL}/contacts`);
+
+  if (!res.ok) throw new Error("Failed to fetch contacts");
+
+  const data: Omit<Contact, "avatarColor">[] = await res.json();
+
+  return data.map((contact) => ({
+    ...contact,
+    avatarColor: getAvatarColor(contact.id),
+  }));
+}
+
+export interface StartConversationPayload {
+  contactId: string;
+  channel: string;
+  content: string;
+  subject?: string;
+  attachments?: File[];
+}
+
+/** Start a new conversation with an existing contact and send the first message */
+export async function startConversation(
+  payload: StartConversationPayload,
+): Promise<ConversationWithContact> {
+  let res: globalThis.Response;
+
+  if (payload.attachments && payload.attachments.length > 0) {
+    const form = new FormData();
+
+    form.append("contactId", payload.contactId);
+    form.append("channel", payload.channel);
+    form.append("content", payload.content);
+
+    if (payload.subject) form.append("subject", payload.subject);
+
+    for (const file of payload.attachments) {
+      form.append("attachments", file);
+    }
+
+    res = await fetch(`${BASE_URL}/conversations`, {
+      method: "POST",
+      body: form,
+    });
+  } else {
+    res = await fetch(`${BASE_URL}/conversations`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contactId: payload.contactId,
+        channel: payload.channel,
+        content: payload.content,
+        subject: payload.subject,
+      }),
+    });
+  }
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    const apiMessage =
+      body && typeof body.message === "string" ? body.message : null;
+    throw new Error(apiMessage ?? "Failed to start conversation");
+  }
+
+  return toConversationWithContact(await res.json());
 }
 
 export interface CreateContactPayload {

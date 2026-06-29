@@ -1,23 +1,42 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { CommandBus } from '@nestjs/cqrs';
+import { CommandBus, QueryBus } from '@nestjs/cqrs';
 import { ContactsController } from './contacts.controller';
 import { CreateContactCommand } from '../commands/create-contact.command';
 import { UpdateContactCommand } from '../commands/update-contact.command';
+import { GetContactsQuery } from '../queries/get-contacts.query';
 
 describe('ContactsController', () => {
   let controller: ContactsController;
   let commandBus: jest.Mocked<CommandBus>;
+  let queryBus: jest.Mocked<QueryBus>;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [ContactsController],
       providers: [
         { provide: CommandBus, useValue: { execute: jest.fn() } },
+        { provide: QueryBus, useValue: { execute: jest.fn() } },
       ],
     }).compile();
 
     controller = module.get(ContactsController);
     commandBus = module.get(CommandBus) as jest.Mocked<CommandBus>;
+    queryBus = module.get(QueryBus) as jest.Mocked<QueryBus>;
+  });
+
+  describe('GET /contacts', () => {
+    it('dispatches GetContactsQuery and returns the contacts', async () => {
+      const contacts = [
+        { id: 'c-1', name: 'Alice', email: 'a@b.com', phone: null, role: null, company: null, createdAt: new Date() },
+      ];
+
+      (queryBus.execute as jest.Mock).mockResolvedValue(contacts);
+
+      const result = await controller.findAll();
+
+      expect(queryBus.execute).toHaveBeenCalledWith(expect.any(GetContactsQuery));
+      expect(result).toBe(contacts);
+    });
   });
 
   describe('POST /contacts', () => {

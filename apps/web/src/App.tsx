@@ -102,6 +102,22 @@ function App() {
     fetchConversations().then(setConversations);
   }
 
+  /** Handle a new conversation started from the inbox */
+  function handleConversationStarted(conversation: ConversationWithContact) {
+    setConversations((prev) => {
+      const others = prev.filter((conv) => conv.id !== conversation.id);
+      return [conversation, ...others].sort((a, b) =>
+        a.lastMessageAt < b.lastMessageAt ? 1 : -1,
+      );
+    });
+    // Open it and (re)load its thread. We fetch explicitly rather than rely on
+    // the [activeId] effect because the conversation may have been an existing
+    // open one that's already active — in which case activeId wouldn't change.
+    setActiveMessages([]);
+    setActiveId(conversation.id);
+    fetchMessages(conversation.id).then(setActiveMessages);
+  }
+
   /** Handle contact updated */
   function handleContactUpdated(updated: Contact) {
     setConversations((prev) =>
@@ -174,6 +190,7 @@ function App() {
         filterStatus={filterStatus}
         onFilterStatus={setFilterStatus}
         onContactCreated={handleContactCreated}
+        onConversationStarted={handleConversationStarted}
       />
 
       {activeConv && activeContact ? (

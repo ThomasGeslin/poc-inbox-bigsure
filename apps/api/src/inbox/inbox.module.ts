@@ -10,6 +10,7 @@ import { CallsController } from './controllers/calls.controller';
 
 // Command handlers
 import { SendMessageHandler } from './commands/send-message.handler';
+import { StartConversationHandler } from './commands/start-conversation.handler';
 import { ReceiveInboundMessageHandler } from './commands/receive-inbound-message.handler';
 import { ReceiveMailHandler } from './commands/receive-mail.handler';
 import { UpdateConversationStatusHandler } from './commands/update-conversation-status.handler';
@@ -21,6 +22,7 @@ import { LogCallHandler } from './commands/log-call.handler';
 // Query handlers
 import { GetConversationsHandler } from './queries/get-conversations.handler';
 import { GetConversationMessagesHandler } from './queries/get-conversation-messages.handler';
+import { GetContactsHandler } from './queries/get-contacts.handler';
 
 // Services
 import { TwilioService } from './services/twilio.service';
@@ -29,6 +31,7 @@ import { StorageService } from './services/storage.service';
 
 const CommandHandlers = [
   SendMessageHandler,
+  StartConversationHandler,
   ReceiveInboundMessageHandler,
   ReceiveMailHandler,
   UpdateConversationStatusHandler,
@@ -38,7 +41,11 @@ const CommandHandlers = [
   LogCallHandler,
 ];
 
-const QueryHandlers = [GetConversationsHandler, GetConversationMessagesHandler];
+const QueryHandlers = [
+  GetConversationsHandler,
+  GetConversationMessagesHandler,
+  GetContactsHandler,
+];
 
 @Module({
   imports: [CqrsModule, RealtimeModule],
