@@ -23,6 +23,7 @@ import { ReceiveMailCommand } from '../commands/receive-mail.command';
 import { LogCallCommand, CallLogStatus } from '../commands/log-call.command';
 import { MsGraphMailService } from '../services/ms-graph-mail.service';
 import { MsGraphNotificationPayload } from '../dto/ms-graph-notification.dto';
+import { stripQuotedReply } from '../utils/mail-content.utils';
 
 @Controller('webhooks')
 export class WebhooksController {
@@ -253,7 +254,9 @@ export class WebhooksController {
       const from = message.from.emailAddress.address;
       const senderName = message.from.emailAddress.name || undefined;
       const subject = message.subject ?? '(sans objet)';
-      const content = message.body?.content ?? '';
+      // Drop the quoted reply chain — sender/subject/thread are already shown
+      // elsewhere in the inbox, so the embedded original message is noise.
+      const content = stripQuotedReply(message.body?.content ?? '');
 
       const headers = message.internetMessageHeaders ?? [];
       const getHeader = (name: string) =>
