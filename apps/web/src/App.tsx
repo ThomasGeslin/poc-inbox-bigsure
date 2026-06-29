@@ -78,6 +78,10 @@ function App() {
 
   /** Handle conversation selection */
   function handleSelect(id: string) {
+    // Already open: bail out. Otherwise we'd clear the thread but the
+    // [activeId] effect wouldn't re-fetch (same value = no re-run).
+    if (id === activeId) return;
+
     setActiveMessages([]);
     setActiveId(id);
 
