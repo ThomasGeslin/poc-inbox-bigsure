@@ -6,14 +6,19 @@ import {
 import { CommandBus } from '@nestjs/cqrs';
 import { WebhooksController } from './webhooks.controller';
 import { TwilioService } from '../services/twilio.service';
+import { MsGraphMailService } from '../services/ms-graph-mail.service';
 import { ReceiveInboundMessageCommand } from '../commands/receive-inbound-message.command';
 import { ReceiveMailCommand } from '../commands/receive-mail.command';
 import { LogCallCommand } from '../commands/log-call.command';
+
+/** Lets floating (un-awaited) promises in the handler settle before asserting. */
+const flushAsync = () => new Promise((resolve) => setImmediate(resolve));
 
 function makeRes() {
   const res = {
     status: jest.fn().mockReturnThis(),
     set: jest.fn().mockReturnThis(),
+    type: jest.fn().mockReturnThis(),
     send: jest.fn().mockReturnThis(),
   };
   return res;
@@ -37,6 +42,7 @@ describe('WebhooksController', () => {
   let controller: WebhooksController;
   let commandBus: jest.Mocked<CommandBus>;
   let twilioService: jest.Mocked<TwilioService>;
+  let msGraphMailService: jest.Mocked<MsGraphMailService>;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -50,12 +56,22 @@ describe('WebhooksController', () => {
             normalizeE164: jest.fn(),
           },
         },
+        {
+          provide: MsGraphMailService,
+          useValue: {
+            getMessage: jest.fn(),
+            registerSubscriptions: jest.fn(),
+          },
+        },
       ],
     }).compile();
 
     controller = module.get(WebhooksController);
     commandBus = module.get(CommandBus) as jest.Mocked<CommandBus>;
     twilioService = module.get(TwilioService) as jest.Mocked<TwilioService>;
+    msGraphMailService = module.get(
+      MsGraphMailService,
+    ) as jest.Mocked<MsGraphMailService>;
 
     process.env.TWILIO_AUTH_TOKEN = 'test-auth-token';
     process.env.TWILIO_FORWARD_NUMBER = '+33700000000';
@@ -191,86 +207,119 @@ describe('WebhooksController', () => {
     });
   });
 
-  // ── POST /mail/inbound ──────────────────────────────────────────────────
+  // ── POST /ms-graph/mail ─────────────────────────────────────────────────
 
-  describe('POST /webhooks/mail/inbound', () => {
-    it('accepts direct format (from, subject, html) and dispatches ReceiveMailCommand', async () => {
+  describe('POST /webhooks/ms-graph/mail', () => {
+    const WEBHOOK_SECRET = 'poc-inbox-secret';
+
+    const makeGraphMessage = (overrides = {}) => ({
+      id: 'graph-1',
+      subject: 'Need a quote',
+      from: { emailAddress: { name: 'Client', address: 'client@example.com' } },
+      body: { contentType: 'HTML', content: '<p>Please quote.</p>' },
+      internetMessageId: '<inbound@example.com>',
+      internetMessageHeaders: [
+        { name: 'From', value: 'Client <client@example.com>' },
+      ],
+      ...overrides,
+    });
+
+    const makeNotification = (overrides = {}) => ({
+      subscriptionId: 'sub-1',
+      subscriptionExpirationDateTime: '2099-01-01T00:00:00Z',
+      changeType: 'created',
+      resource: 'users/plomberie-bigsur@batibig.com/messages/graph-1',
+      resourceData: {
+        '@odata.type': '#Microsoft.Graph.Message',
+        '@odata.id': 'Users/x/Messages/graph-1',
+        id: 'graph-1',
+      },
+      clientState: WEBHOOK_SECRET,
+      ...overrides,
+    });
+
+    it('echoes the validationToken with 200 text/plain during the subscription handshake', async () => {
+      const res = makeRes();
+
+      await controller.handleMsGraphMail('the-token', undefined, res as never);
+
+      expect(res.status).toHaveBeenCalledWith(200);
+      expect(res.send).toHaveBeenCalledWith('the-token');
+      expect(commandBus.execute).not.toHaveBeenCalled();
+    });
+
+    it('responds 202 and ignores an empty notification payload', async () => {
+      const res = makeRes();
+
+      await controller.handleMsGraphMail(undefined, { value: [] }, res as never);
+
+      expect(res.status).toHaveBeenCalledWith(202);
+      expect(msGraphMailService.getMessage).not.toHaveBeenCalled();
+    });
+
+    it('fetches the message and dispatches ReceiveMailCommand for a valid notification', async () => {
+      (msGraphMailService.getMessage as jest.Mock).mockResolvedValue(
+        makeGraphMessage(),
+      );
       (commandBus.execute as jest.Mock).mockResolvedValue(undefined);
 
-      const result = await controller.handleMailInbound({
-        from: 'client@example.com',
-        subject: 'Need a quote',
-        html: '<p>Please quote bathroom renovation.</p>',
-      });
+      const res = makeRes();
+      await controller.handleMsGraphMail(
+        undefined,
+        { value: [makeNotification()] },
+        res as never,
+      );
 
-      expect(commandBus.execute).toHaveBeenCalledWith(expect.any(ReceiveMailCommand));
+      // Responds immediately; processing happens on a floating promise.
+      expect(res.status).toHaveBeenCalledWith(202);
+      await flushAsync();
+
+      expect(msGraphMailService.getMessage).toHaveBeenCalledWith(
+        'plomberie-bigsur@batibig.com',
+        'graph-1',
+      );
+      expect(commandBus.execute).toHaveBeenCalledWith(
+        expect.any(ReceiveMailCommand),
+      );
       expect(commandBus.execute).toHaveBeenCalledWith(
         expect.objectContaining({
           from: 'client@example.com',
           subject: 'Need a quote',
-          content: '<p>Please quote bathroom renovation.</p>',
-        }),
-      );
-      expect(result).toEqual({ received: true });
-    });
-
-    it('accepts Cloudmailin JSON Normalized format (envelope.from, headers.subject)', async () => {
-      (commandBus.execute as jest.Mock).mockResolvedValue(undefined);
-
-      await controller.handleMailInbound({
-        envelope: { from: 'cloudclient@example.com', to: 'inbox@cloudmailin.net' },
-        headers: { subject: 'Cloudmailin subject', message_id: '<cm-msg-id@example.com>' },
-        plain: 'Plain text body',
-      });
-
-      expect(commandBus.execute).toHaveBeenCalledWith(
-        expect.objectContaining({
-          from: 'cloudclient@example.com',
-          subject: 'Cloudmailin subject',
-          content: 'Plain text body',
-          messageId: '<cm-msg-id@example.com>',
+          graphMessageId: 'graph-1',
         }),
       );
     });
 
-    it('passes In-Reply-To and References headers through for email threading', async () => {
-      (commandBus.execute as jest.Mock).mockResolvedValue(undefined);
+    it('ignores notifications whose clientState does not match the secret', async () => {
+      const res = makeRes();
 
-      await controller.handleMailInbound({
-        from: 'client@example.com',
-        subject: 'Re: Quote request',
-        text: 'Got it thanks',
-        inReplyTo: '<prior-msg@resend.dev>',
-        references: '<prior-msg@resend.dev> <older@resend.dev>',
-      });
-
-      expect(commandBus.execute).toHaveBeenCalledWith(
-        expect.objectContaining({
-          inReplyTo: '<prior-msg@resend.dev>',
-          references: ['<prior-msg@resend.dev>', '<older@resend.dev>'],
-        }),
+      await controller.handleMsGraphMail(
+        undefined,
+        { value: [makeNotification({ clientState: 'wrong-secret' })] },
+        res as never,
       );
-    });
 
-    it('throws BadRequestException when "from" field is missing', async () => {
-      await expect(
-        controller.handleMailInbound({ subject: 'Test', html: '<p>Hi</p>' }),
-      ).rejects.toThrow(BadRequestException);
+      expect(res.status).toHaveBeenCalledWith(202);
+      await flushAsync();
 
+      expect(msGraphMailService.getMessage).not.toHaveBeenCalled();
       expect(commandBus.execute).not.toHaveBeenCalled();
     });
 
-    it('falls back to "(sans objet)" when no subject is provided', async () => {
-      (commandBus.execute as jest.Mock).mockResolvedValue(undefined);
-
-      await controller.handleMailInbound({
-        from: 'nosubject@example.com',
-        html: '<p>No subject email</p>',
-      });
-
-      expect(commandBus.execute).toHaveBeenCalledWith(
-        expect.objectContaining({ subject: '(sans objet)' }),
+    it('deduplicates repeated message ids within a single payload batch', async () => {
+      (msGraphMailService.getMessage as jest.Mock).mockResolvedValue(
+        makeGraphMessage(),
       );
+
+      const res = makeRes();
+      await controller.handleMsGraphMail(
+        undefined,
+        { value: [makeNotification(), makeNotification()] },
+        res as never,
+      );
+      await flushAsync();
+
+      expect(msGraphMailService.getMessage).toHaveBeenCalledTimes(1);
     });
   });
 

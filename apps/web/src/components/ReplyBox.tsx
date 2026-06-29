@@ -52,8 +52,8 @@ export default function ReplyBox({
   const hasPriorMail = messages.some((m) => m.channel === "mail");
   const showSubject = channel === "mail" && !hasPriorMail;
 
-  const hasPhone = contact.phone.trim().length > 0;
-  const hasEmail = contact.email.trim().length > 0;
+  const hasPhone = (contact.phone ?? "").trim().length > 0;
+  const hasEmail = (contact.email ?? "").trim().length > 0;
   const channelReady =
     (channel === "mail" && hasEmail) ||
     ((channel === "sms" || channel === "whatsapp") && hasPhone);

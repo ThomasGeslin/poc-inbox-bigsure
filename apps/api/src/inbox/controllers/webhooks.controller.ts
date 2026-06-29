@@ -5,6 +5,7 @@ import {
   Headers,
   Req,
   Res,
+  Query,
   HttpCode,
   HttpStatus,
   BadRequestException,
@@ -20,6 +21,8 @@ import { TwilioService } from '../services/twilio.service';
 import { ReceiveInboundMessageCommand } from '../commands/receive-inbound-message.command';
 import { ReceiveMailCommand } from '../commands/receive-mail.command';
 import { LogCallCommand, CallLogStatus } from '../commands/log-call.command';
+import { MsGraphMailService } from '../services/ms-graph-mail.service';
+import { MsGraphNotificationPayload } from '../dto/ms-graph-notification.dto';
 
 @Controller('webhooks')
 export class WebhooksController {
@@ -28,6 +31,7 @@ export class WebhooksController {
   constructor(
     private readonly commandBus: CommandBus,
     private readonly twilioService: TwilioService,
+    private readonly msGraphMailService: MsGraphMailService,
   ) {}
 
   /** Handle incoming SMS messages from Twilio */
@@ -166,95 +170,133 @@ export class WebhooksController {
     res.status(200).set('Content-Type', 'text/xml').send(this.emptyTwiml());
   }
 
-  // ── Mail inbound ─────────────────────────────────────────────────────────
-  // Compatible avec Cloudmailin (JSON Normalized), Mailgun (inbound parse)
-  // et les tests manuels via curl.
-  // Cloudmailin: configurer l'URL de destination sur https://ton-ngrok/api/webhooks/mail/inbound
-  // Format Cloudmailin JSON Normalized → champs: envelope.from, headers.subject,
-  // html, plain, headers.message_id, headers.in_reply_to, headers.references
-  @Post('mail/inbound')
-  @HttpCode(HttpStatus.OK)
-  async handleMailInbound(
-    @Body()
-    body: {
-      // Format direct (tests curl / intégrations simples)
-      from?: string;
-      subject?: string;
-      html?: string;
-      text?: string;
-      messageId?: string;
-      inReplyTo?: string;
-      references?: string;
-      // Format Cloudmailin JSON Normalized
-      envelope?: { from?: string; to?: string };
-      headers?: {
-        from?: string;
-        subject?: string;
-        message_id?: string;
-        in_reply_to?: string;
-        references?: string;
-        // Mailgun uses these names too
-        'Message-Id'?: string;
-        'In-Reply-To'?: string;
-        References?: string;
-      };
-      plain?: string;
-    },
-  ): Promise<{ received: boolean }> {
-    // Log raw body for debugging provider format
-    this.logger.debug(`Mail inbound raw body: ${JSON.stringify(body)}`);
-
-    if (!body || typeof body !== 'object') {
-      this.logger.error(`Unexpected body type: ${typeof body}`);
-      throw new BadRequestException('Unexpected body format');
+  // ── Microsoft Graph mail notifications ───────────────────────────────────
+  // Graph sends a POST to this endpoint for two scenarios:
+  //  1. Subscription validation: query param ?validationToken=<token> present
+  //     → respond 200 text/plain with the token verbatim
+  //  2. New message notification: body contains { value: [...] }
+  //     → fetch full message from Graph, dispatch ReceiveMailCommand
+  @Post('ms-graph/mail')
+  async handleMsGraphMail(
+    @Query('validationToken') validationToken: string | undefined,
+    @Body() body: unknown,
+    @Res() res: Response,
+  ): Promise<void> {
+    // ── Subscription validation handshake ──────────────────────────────
+    if (validationToken) {
+      this.logger.log('Graph subscription validation handshake received');
+      res.status(200).type('text/plain').send(validationToken);
+      return;
     }
 
-    // Normalize fields across providers
-    const from = body.from ?? body.envelope?.from ?? '';
-
-    if (!from) {
-      throw new BadRequestException('Missing required field: from');
+    // ── Notification payload ────────────────────────────────────────────
+    const payload = body as MsGraphNotificationPayload;
+    if (!payload?.value?.length) {
+      res.status(202).send();
+      return;
     }
 
-    // Extract display name from the full From header (e.g. "John Doe <john@example.com>")
-    const senderName = this.extractEmailDisplayName(
-      body.headers?.from ?? body.from ?? '',
-    );
+    const expectedSecret =
+      process.env.MS_GRAPH_WEBHOOK_SECRET ?? 'poc-inbox-secret';
 
-    const subject = body.subject ?? body.headers?.subject ?? '(sans objet)';
+    // Deduplicate within the same payload batch (Graph can repeat items)
+    const seenIds = new Set<string>();
 
-    const content = body.html ?? body.text ?? body.plain ?? '';
+    for (const item of payload.value) {
+      if (item.clientState !== expectedSecret) {
+        this.logger.warn(
+          `Graph notification ignored — invalid clientState (subscriptionId=${item.subscriptionId})`,
+        );
+        continue;
+      }
 
-    const messageId =
-      body.messageId ??
-      body.headers?.message_id ??
-      body.headers?.['Message-Id'];
+      // resource: "Users/{objectId-or-upn}/Messages/{messageId}"  (case varies)
+      const resourceMatch = item.resource?.match(
+        /^users\/([^/]+)\/.*\/([^/]+)$/i,
+      );
+      const mailbox = resourceMatch?.[1];
+      // Prefer resourceData.id, fall back to last segment of the resource URL
+      const graphMessageId = item.resourceData?.id ?? resourceMatch?.[2];
 
-    const inReplyTo =
-      body.inReplyTo ??
-      body.headers?.in_reply_to ??
-      body.headers?.['In-Reply-To'];
+      if (!graphMessageId || !mailbox) {
+        this.logger.warn(
+          `Graph notification missing messageId or mailbox — resource=${item.resource}`,
+        );
+        continue;
+      }
 
-    const referencesRaw =
-      body.references ?? body.headers?.references ?? body.headers?.References;
+      if (seenIds.has(graphMessageId)) {
+        this.logger.debug(
+          `Duplicate Graph notification skipped — messageId=${graphMessageId}`,
+        );
+        continue;
+      }
+      seenIds.add(graphMessageId);
 
-    const references = referencesRaw
-      ? referencesRaw.split(/\s+/).filter(Boolean)
-      : undefined;
+      // Process asynchronously — respond immediately to Graph (< 3 s required)
+      void this.processMsGraphMailNotification(mailbox, graphMessageId);
+    }
 
-    await this.commandBus.execute(
-      new ReceiveMailCommand(
-        from,
-        subject,
-        content,
-        messageId,
-        inReplyTo,
-        references,
-        senderName,
-      ),
-    );
+    res.status(202).send();
+  }
 
-    return { received: true };
+  private async processMsGraphMailNotification(
+    mailbox: string,
+    graphMessageId: string,
+  ): Promise<void> {
+    try {
+      const message = await this.msGraphMailService.getMessage(
+        mailbox,
+        graphMessageId,
+      );
+
+      const from = message.from.emailAddress.address;
+      const senderName = message.from.emailAddress.name || undefined;
+      const subject = message.subject ?? '(sans objet)';
+      const content = message.body?.content ?? '';
+
+      const headers = message.internetMessageHeaders ?? [];
+      const getHeader = (name: string) =>
+        headers.find((h) => h.name.toLowerCase() === name.toLowerCase())?.value;
+
+      // Prefer the RFC From header which always contains the real email address.
+      // message.from.emailAddress.address can be an Azure Object ID for internal users.
+      const rawFromHeader = getHeader('from') ?? '';
+      const fromHeaderMatch = rawFromHeader.match(/<([^>]+)>/);
+      const resolvedFrom = fromHeaderMatch?.[1] ?? from;
+
+      // Extract display name from the RFC From header (e.g. "John Doe <john@example.com>")
+      const fromHeaderNameMatch = rawFromHeader.match(/^"?([^"<]+?)"?\s*</);
+      const resolvedSenderName = fromHeaderNameMatch?.[1]?.trim() || senderName;
+
+      const internetMessageId = message.internetMessageId;
+      const inReplyTo = getHeader('In-Reply-To');
+      const referencesRaw = getHeader('References');
+      const references = referencesRaw
+        ? referencesRaw.split(/\s+/).filter(Boolean)
+        : undefined;
+
+      await this.commandBus.execute(
+        new ReceiveMailCommand(
+          resolvedFrom,
+          subject,
+          content,
+          internetMessageId,
+          inReplyTo,
+          references,
+          resolvedSenderName,
+          graphMessageId,
+        ),
+      );
+
+      this.logger.log(
+        `[ms-graph/mail] Message stored — from=${resolvedFrom} subject="${subject}"`,
+      );
+    } catch (err) {
+      this.logger.error(
+        `Failed to process Graph mail notification (messageId=${graphMessageId}): ${String(err)}`,
+      );
+    }
   }
 
   // ── Twilio Voice inbound ─────────────────────────────────────────────────
@@ -392,12 +434,6 @@ export class WebhooksController {
   /********************/
   /** Utils functions */
   /********************/
-  private extractEmailDisplayName(raw: string): string | undefined {
-    const match = raw.match(/^"?([^"<]+?)"?\s*<[^>]+>$/);
-    const name = match?.[1]?.trim();
-    return name || undefined;
-  }
-
   private normalizePhone(raw: string): string | null {
     try {
       if (isValidPhoneNumber(raw)) {

@@ -7,5 +7,7 @@ export class ReceiveMailCommand {
     public readonly inReplyTo?: string,
     public readonly references?: string[],
     public readonly senderName?: string,
+    /** Graph internal message ID (used to reply via Graph API) */
+    public readonly graphMessageId?: string,
   ) {}
 }

@@ -3,12 +3,10 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { json, urlencoded } from 'express';
 import { AppModule } from './app.module';
+import { MsGraphMailService } from './inbox/services/ms-graph-mail.service';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
-
-  // Force JSON parsing on Cloudmailin webhook regardless of Content-Type header
-  app.use('/api/webhooks/mail/inbound', json({ type: '*/*' }));
 
   // Parse JSON and URL-encoded bodies (required for Twilio webhooks and REST API)
   app.use(json());
@@ -28,6 +26,11 @@ async function bootstrap() {
   });
   app.setGlobalPrefix('api');
   await app.listen(process.env.PORT ?? 3000);
+
+  // Register Graph mail subscriptions AFTER the server is listening so that
+  // Graph's validation handshake can reach the webhook endpoint.
+  const graphService = app.get(MsGraphMailService);
+  await graphService.registerSubscriptions();
 }
 
 void bootstrap();

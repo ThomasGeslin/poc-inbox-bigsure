@@ -48,16 +48,25 @@ function makePrisma() {
   };
   const message = {
     findFirst: jest.fn(),
+    findUnique: jest.fn().mockResolvedValue(null),
     create: jest.fn(),
   };
+
+  const client = { contact, conversation, message };
+
+  // Support both the interactive callback form ($transaction(async (tx) => …))
+  // used by the handler and the legacy array form. The callback receives the
+  // same mocked client so assertions on prisma.<model> still observe the calls.
   const $transaction = jest
     .fn()
-    .mockImplementation((ops: Promise<unknown>[]) => Promise.all(ops));
+    .mockImplementation((arg: unknown) =>
+      typeof arg === 'function'
+        ? (arg as (tx: unknown) => unknown)(client)
+        : Promise.all(arg as Promise<unknown>[]),
+    );
 
   return {
-    contact,
-    conversation,
-    message,
+    ...client,
     $transaction,
   } as unknown as import('../../../prisma/prisma.service').PrismaService;
 }
@@ -109,7 +118,7 @@ describe('ReceiveMailHandler', () => {
       const conversation = makeConversation();
       const priorMessage = makeMessage({
         id: 'msg-0',
-        meta: { messageId: '<prior@resend.dev>' },
+        meta: { messageId: '<prior@example.com>' },
         conversation,
       });
 
@@ -125,9 +134,9 @@ describe('ReceiveMailHandler', () => {
           EMAIL,
           'Re: ' + SUBJECT,
           CONTENT,
-          '<reply@resend.dev>',
-          '<prior@resend.dev>',
-          ['<prior@resend.dev>'],
+          '<reply@example.com>',
+          '<prior@example.com>',
+          ['<prior@example.com>'],
         ),
       );
 
@@ -251,6 +260,63 @@ describe('ReceiveMailHandler', () => {
       expect(prisma.conversation.update).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({ unreadCount: { increment: 1 } }),
+        }),
+      );
+    });
+  });
+
+  describe('idempotency', () => {
+    it('returns the stored message without opening a transaction when externalId already exists', async () => {
+      const existing = makeMessage({ id: 'msg-existing' });
+      (prisma.message.findUnique as jest.Mock).mockResolvedValue(existing);
+
+      const result = await handler.execute(
+        new ReceiveMailCommand(
+          EMAIL,
+          SUBJECT,
+          CONTENT,
+          '<dup-msg-id@example.com>',
+        ),
+      );
+
+      expect(result).toEqual(existing);
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(prisma.message.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Graph message id', () => {
+    it('persists the inbound externalId and Graph id so replies can thread via Graph', async () => {
+      const contact = makeContact();
+      const conversation = makeConversation();
+
+      (prisma.contact.findFirst as jest.Mock).mockResolvedValue(contact);
+      (prisma.message.findFirst as jest.Mock).mockResolvedValue(null);
+      (prisma.conversation.findFirst as jest.Mock).mockResolvedValue(
+        conversation,
+      );
+      (prisma.message.create as jest.Mock).mockResolvedValue(makeMessage());
+      (prisma.conversation.update as jest.Mock).mockResolvedValue(conversation);
+
+      await handler.execute(
+        new ReceiveMailCommand(
+          EMAIL,
+          SUBJECT,
+          CONTENT,
+          '<inbound-msg-id@example.com>',
+          undefined,
+          undefined,
+          undefined,
+          'graph-msg-789',
+        ),
+      );
+
+      expect(prisma.message.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            externalId: '<inbound-msg-id@example.com>',
+            meta: expect.objectContaining({ graphId: 'graph-msg-789' }),
+          }),
         }),
       );
     });

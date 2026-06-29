@@ -2,7 +2,10 @@ import { CommandHandler, ICommandHandler } from '@nestjs/cqrs';
 import { Logger } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { ReceiveMailCommand } from './receive-mail.command';
-import { Message } from '@prisma/client';
+import { Message, Prisma } from '@prisma/client';
+
+// Type of the interactive transaction client
+type Tx = Parameters<Parameters<PrismaService['$transaction']>[0]>[0];
 
 @CommandHandler(ReceiveMailCommand)
 export class ReceiveMailHandler implements ICommandHandler<ReceiveMailCommand> {
@@ -19,100 +22,133 @@ export class ReceiveMailHandler implements ICommandHandler<ReceiveMailCommand> {
       inReplyTo,
       references,
       senderName,
+      graphMessageId,
     } = command;
 
-    // ── 1. Find or create Contact by email ───────────────────────────────
-    let contact = await this.prisma.contact.findFirst({
-      where: { email: { equals: from, mode: 'insensitive' } },
-    });
-
-    if (!contact) {
-      this.logger.log(`No contact found for ${from}, creating minimal contact`);
-
-      const name = senderName ?? from.split('@')[0] ?? from;
-      contact = await this.prisma.contact.create({
-        data: { name, email: from },
+    // ── Fast idempotency check before acquiring a transaction ─────────────
+    // Avoids unnecessary DB round-trips when the message is clearly a duplicate.
+    if (messageId) {
+      const existing = await this.prisma.message.findUnique({
+        where: { externalId: messageId },
       });
+
+      if (existing) {
+        this.logger.debug(
+          `Duplicate inbound mail ignored — externalId=${messageId} already stored`,
+        );
+        return existing;
+      }
     }
 
-    // ── 2. Find conversation: threading → subject match → latest open ────
-    let conversation = await this.findConversationByThreading(
-      contact.id,
-      inReplyTo,
-      references,
-    );
+    // ── Single atomic transaction: contact + conversation + message ────────
+    // If two concurrent threads both pass the fast check above and race here,
+    // the one that loses will fail on the DB UNIQUE constraint on
+    // messages.external_id. Postgres then rolls back the ENTIRE transaction
+    // for the loser — contact and conversation included — so no duplicates.
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        // 1. Find or create Contact
+        let contact = await tx.contact.findFirst({
+          where: { email: { equals: from, mode: 'insensitive' } },
+        });
+        if (!contact) {
+          this.logger.log(
+            `No contact found for ${from}, creating minimal contact`,
+          );
+          const name = senderName ?? from.split('@')[0] ?? from;
+          contact = await tx.contact.create({ data: { name, email: from } });
+        }
 
-    if (!conversation) {
-      // Try to find open conversation with matching subject (strip Re:/Fwd: prefixes)
-      const normalizedSubject = subject
-        .replace(/^(re|fwd?)\s*:\s*/i, '')
-        .trim();
+        // 2. Find conversation: threading → subject match → latest open → create
+        let conversation = await this.findConversationByThreading(
+          tx,
+          contact.id,
+          inReplyTo,
+          references,
+        );
 
-      conversation = await this.prisma.conversation.findFirst({
-        where: {
-          contactId: contact.id,
-          status: { not: 'TRAITE' },
-          subject: { contains: normalizedSubject, mode: 'insensitive' },
-        },
-        orderBy: { lastMessageAt: 'desc' },
+        if (!conversation) {
+          const normalizedSubject = subject
+            .replace(/^(re|fwd?)\s*:\s*/i, '')
+            .trim();
+          conversation = await tx.conversation.findFirst({
+            where: {
+              contactId: contact.id,
+              status: { not: 'TRAITE' },
+              subject: { contains: normalizedSubject, mode: 'insensitive' },
+            },
+            orderBy: { lastMessageAt: 'desc' },
+          });
+        }
+
+        if (!conversation) {
+          conversation = await tx.conversation.findFirst({
+            where: { contactId: contact.id, status: { not: 'TRAITE' } },
+            orderBy: { lastMessageAt: 'desc' },
+          });
+        }
+
+        if (!conversation) {
+          conversation = await tx.conversation.create({
+            data: { contactId: contact.id, channel: 'MAIL', subject },
+          });
+        }
+
+        // 3. Create message — UNIQUE constraint on externalId is the safety net.
+        // If another transaction already inserted this message, this throws P2002
+        // and Postgres rolls back this entire transaction (steps 1 & 2 included).
+        const meta: Record<string, unknown> = {};
+        if (messageId) meta.messageId = messageId;
+        if (graphMessageId) meta.graphId = graphMessageId;
+        if (inReplyTo) meta.inReplyTo = inReplyTo;
+        if (references?.length) meta.references = references;
+
+        const message = await tx.message.create({
+          data: {
+            conversationId: conversation.id,
+            channel: 'MAIL',
+            direction: 'INBOUND',
+            content,
+            externalId: messageId ?? undefined,
+            meta: Object.keys(meta).length > 0 ? (meta as object) : undefined,
+          },
+        });
+
+        await tx.conversation.update({
+          where: { id: conversation.id },
+          data: {
+            lastMessageAt: new Date(),
+            unreadCount: { increment: 1 },
+            channel: 'MAIL',
+          },
+        });
+
+        return message;
       });
+    } catch (err) {
+      // UNIQUE constraint on externalId → whole transaction was rolled back.
+      // Return the message stored by the winning concurrent thread.
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === 'P2002'
+      ) {
+        this.logger.debug(
+          `Concurrent duplicate blocked by DB constraint — externalId=${messageId}`,
+        );
+
+        const existing = await this.prisma.message.findUnique({
+          where: { externalId: messageId! },
+        });
+
+        return existing!;
+      }
+
+      throw err;
     }
-
-    if (!conversation) {
-      // Fallback: reuse the most recent open conversation for this contact
-      conversation = await this.prisma.conversation.findFirst({
-        where: {
-          contactId: contact.id,
-          status: { not: 'TRAITE' },
-        },
-        orderBy: { lastMessageAt: 'desc' },
-      });
-    }
-
-    if (!conversation) {
-      conversation = await this.prisma.conversation.create({
-        data: {
-          contactId: contact.id,
-          channel: 'MAIL',
-          subject,
-        },
-      });
-    }
-
-    // ── 3. Persist message + update conversation ──────────────────────────
-    const meta: Record<string, unknown> = {};
-    if (messageId) meta.messageId = messageId;
-    if (inReplyTo) meta.inReplyTo = inReplyTo;
-    if (references?.length) meta.references = references;
-
-    const [message] = await this.prisma.$transaction([
-      this.prisma.message.create({
-        data: {
-          conversationId: conversation.id,
-          channel: 'MAIL',
-          direction: 'INBOUND',
-          content,
-          meta: Object.keys(meta).length > 0 ? (meta as object) : undefined,
-        },
-      }),
-      this.prisma.conversation.update({
-        where: { id: conversation.id },
-        data: {
-          lastMessageAt: new Date(),
-          unreadCount: { increment: 1 },
-          channel: 'MAIL', // track last channel used
-        },
-      }),
-    ]);
-
-    return message;
   }
 
-  /**
-   * Finds a conversation by looking up a prior message whose meta.messageId
-   * matches the inbound In-Reply-To or References header values.
-   */
   private async findConversationByThreading(
+    tx: Tx,
     contactId: string,
     inReplyTo?: string,
     references?: string[],
@@ -123,7 +159,7 @@ export class ReceiveMailHandler implements ICommandHandler<ReceiveMailCommand> {
     ];
 
     for (const ref of candidates) {
-      const priorMessage = await this.prisma.message.findFirst({
+      const priorMessage = await tx.message.findFirst({
         where: {
           channel: 'MAIL',
           conversation: { contactId },

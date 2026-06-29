@@ -71,9 +71,13 @@ function makeTwilio() {
   };
 }
 
-function makeResend() {
+const DEFAULT_FROM = 'plomberie-bigsur@batibig.com';
+
+function makeGraph() {
   return {
-    sendEmail: jest.fn().mockResolvedValue('<resend-msg-id@resend.dev>'),
+    defaultFrom: DEFAULT_FROM,
+    sendEmail: jest.fn().mockResolvedValue('<sent-msg-id@poc-inbox>'),
+    replyToMessage: jest.fn().mockResolvedValue('<reply-msg-id@poc-inbox>'),
   };
 }
 
@@ -81,13 +85,13 @@ describe('SendMessageHandler', () => {
   let handler: SendMessageHandler;
   let prisma: ReturnType<typeof makePrisma>;
   let twilio: ReturnType<typeof makeTwilio>;
-  let resend: ReturnType<typeof makeResend>;
+  let graph: ReturnType<typeof makeGraph>;
 
   beforeEach(() => {
     prisma = makePrisma();
     twilio = makeTwilio();
-    resend = makeResend();
-    handler = new SendMessageHandler(prisma, twilio as never, resend as never);
+    graph = makeGraph();
+    handler = new SendMessageHandler(prisma, twilio as never, graph as never);
   });
 
   describe('conversation not found', () => {
@@ -101,7 +105,7 @@ describe('SendMessageHandler', () => {
   });
 
   describe('MAIL channel', () => {
-    it('sends email via Resend, persists outbound message and returns it', async () => {
+    it('sends a new email via Graph, persists outbound message and returns it', async () => {
       const conversation = makeConversation();
       const message = makeMessage({ content: 'Hi there', channel: 'MAIL' });
 
@@ -116,21 +120,21 @@ describe('SendMessageHandler', () => {
         new SendMessageCommand(CONV_ID, 'MAIL', 'Hi there'),
       );
 
-      expect(resend.sendEmail).toHaveBeenCalledWith(
+      expect(graph.sendEmail).toHaveBeenCalledWith(
         EMAIL,
         expect.any(String),
         expect.any(String),
-        undefined,
       );
+      expect(graph.replyToMessage).not.toHaveBeenCalled();
       expect(result).toEqual(message);
     });
 
-    it('threads reply using In-Reply-To when a prior MAIL message has a messageId', async () => {
+    it('threads via Graph createReply when a prior MAIL message has a graphId', async () => {
       const conversation = makeConversation();
       const priorMessage = makeMessage({
         id: 'msg-0',
         channel: 'MAIL',
-        meta: { messageId: '<prior@resend.dev>' },
+        meta: { messageId: '<prior@poc-inbox>', graphId: 'graph-msg-123' },
       });
 
       (prisma.conversation.findUnique as jest.Mock).mockResolvedValue(
@@ -144,12 +148,58 @@ describe('SendMessageHandler', () => {
         new SendMessageCommand(CONV_ID, 'MAIL', 'Reply text'),
       );
 
-      expect(resend.sendEmail).toHaveBeenCalledWith(
-        EMAIL,
+      expect(graph.replyToMessage).toHaveBeenCalledWith(
+        DEFAULT_FROM,
+        'graph-msg-123',
         expect.any(String),
-        expect.any(String),
-        { inReplyTo: '<prior@resend.dev>', references: ['<prior@resend.dev>'] },
       );
+      expect(graph.sendEmail).not.toHaveBeenCalled();
+    });
+
+    it('persists the replied-to graphId so consecutive replies keep threading', async () => {
+      const conversation = makeConversation();
+      const priorMessage = makeMessage({
+        id: 'msg-0',
+        channel: 'MAIL',
+        meta: { messageId: '<prior@poc-inbox>', graphId: 'graph-msg-123' },
+      });
+
+      (prisma.conversation.findUnique as jest.Mock).mockResolvedValue(
+        conversation,
+      );
+      (prisma.message.findFirst as jest.Mock).mockResolvedValue(priorMessage);
+      (prisma.message.create as jest.Mock).mockResolvedValue(makeMessage());
+      (prisma.conversation.update as jest.Mock).mockResolvedValue(conversation);
+
+      await handler.execute(
+        new SendMessageCommand(CONV_ID, 'MAIL', 'Reply text'),
+      );
+
+      const createArg = (prisma.message.create as jest.Mock).mock.calls[0][0];
+      expect(createArg.data.meta).toMatchObject({ graphId: 'graph-msg-123' });
+    });
+
+    it('falls back to a new email when the prior MAIL message has no graphId', async () => {
+      const conversation = makeConversation();
+      const priorMessage = makeMessage({
+        id: 'msg-0',
+        channel: 'MAIL',
+        meta: { messageId: '<prior@poc-inbox>' },
+      });
+
+      (prisma.conversation.findUnique as jest.Mock).mockResolvedValue(
+        conversation,
+      );
+      (prisma.message.findFirst as jest.Mock).mockResolvedValue(priorMessage);
+      (prisma.message.create as jest.Mock).mockResolvedValue(makeMessage());
+      (prisma.conversation.update as jest.Mock).mockResolvedValue(conversation);
+
+      await handler.execute(
+        new SendMessageCommand(CONV_ID, 'MAIL', 'Reply text'),
+      );
+
+      expect(graph.sendEmail).toHaveBeenCalled();
+      expect(graph.replyToMessage).not.toHaveBeenCalled();
     });
 
     it('throws InternalServerErrorException when contact has no email', async () => {
@@ -165,21 +215,21 @@ describe('SendMessageHandler', () => {
         handler.execute(new SendMessageCommand(CONV_ID, 'MAIL', 'Hi')),
       ).rejects.toThrow(InternalServerErrorException);
 
-      expect(resend.sendEmail).not.toHaveBeenCalled();
+      expect(graph.sendEmail).not.toHaveBeenCalled();
     });
 
-    it('does not persist message when Resend throws', async () => {
+    it('does not persist message when Graph send throws', async () => {
       const conversation = makeConversation();
 
       (prisma.conversation.findUnique as jest.Mock).mockResolvedValue(
         conversation,
       );
       (prisma.message.findFirst as jest.Mock).mockResolvedValue(null);
-      resend.sendEmail.mockRejectedValue(new Error('Resend API down'));
+      graph.sendEmail.mockRejectedValue(new Error('Graph API down'));
 
       await expect(
         handler.execute(new SendMessageCommand(CONV_ID, 'MAIL', 'Hi')),
-      ).rejects.toThrow('Resend API down');
+      ).rejects.toThrow('Graph API down');
 
       expect(prisma.$transaction).not.toHaveBeenCalled();
     });

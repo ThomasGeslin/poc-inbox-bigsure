@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { TwilioService } from '../services/twilio.service';
-import { ResendService } from '../services/resend.service';
+import { MsGraphMailService } from '../services/ms-graph-mail.service';
 import { SendMessageCommand } from './send-message.command';
 import { Message } from '@prisma/client';
 
@@ -17,7 +17,7 @@ export class SendMessageHandler implements ICommandHandler<SendMessageCommand> {
   constructor(
     private readonly prisma: PrismaService,
     private readonly twilioService: TwilioService,
-    private readonly resendService: ResendService,
+    private readonly msGraphMailService: MsGraphMailService,
   ) {}
 
   async execute(command: SendMessageCommand): Promise<Message> {
@@ -47,34 +47,53 @@ export class SendMessageHandler implements ICommandHandler<SendMessageCommand> {
       // Determine email subject: command override > conversation subject
       const emailSubject = subject || conversation.subject || '(sans objet)';
 
-      // Threading: find last MAIL message in this conversation that has a messageId
+      // Threading: find last MAIL message in this conversation that has a graphId
       const lastMailMessage = await this.prisma.message.findFirst({
         where: { conversationId, channel: 'MAIL' },
         orderBy: { timestamp: 'desc' },
       });
 
       const lastMeta = lastMailMessage?.meta as Record<string, unknown> | null;
+      const inReplyToGraphId = lastMeta?.graphId as string | undefined;
       const inReplyTo = lastMeta?.messageId as string | undefined;
 
       const htmlContent = content.startsWith('<')
         ? content
         : `<p>${content.replace(/\n/g, '<br>')}</p>`;
 
-      let resendId: string;
+      let sentMessageId: string;
+      // Graph id to thread off for the NEXT outbound message in this thread.
+      // We carry forward the original inbound message's id so that consecutive
+      // outbound replies (no contact reply in between) keep threading to the
+      // same thread instead of starting a fresh one.
+      let outboundGraphId: string | undefined;
       try {
-        resendId = await this.resendService.sendEmail(
-          email,
-          emailSubject,
-          htmlContent,
-          inReplyTo ? { inReplyTo, references: [inReplyTo] } : undefined,
-        );
+        if (inReplyToGraphId) {
+          // Use Graph createReply for proper RFC threading (In-Reply-To / References)
+          sentMessageId = await this.msGraphMailService.replyToMessage(
+            this.msGraphMailService.defaultFrom,
+            inReplyToGraphId,
+            htmlContent,
+          );
+          outboundGraphId = inReplyToGraphId;
+        } else {
+          sentMessageId = await this.msGraphMailService.sendEmail(
+            email,
+            emailSubject,
+            htmlContent,
+          );
+        }
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
-        this.logger.error(`Resend send failed, aborting persist: ${msg}`);
+        this.logger.error(`Graph sendMail failed, aborting persist: ${msg}`);
         throw err;
       }
 
-      outboundMeta = { messageId: resendId, inReplyTo };
+      outboundMeta = {
+        messageId: sentMessageId,
+        inReplyTo,
+        ...(outboundGraphId ? { graphId: outboundGraphId } : {}),
+      };
 
       // Update conversation subject if it was blank
       if (!conversation.subject && emailSubject) {
