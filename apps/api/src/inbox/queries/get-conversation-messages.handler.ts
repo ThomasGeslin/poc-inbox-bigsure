@@ -2,14 +2,7 @@ import { IQueryHandler, QueryHandler } from '@nestjs/cqrs';
 import { NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { GetConversationMessagesQuery } from './get-conversation-messages.query';
-import { Channel } from '@prisma/client';
-
-const CHANNEL_MAP: Record<Channel, string> = {
-  MAIL: 'mail',
-  WHATSAPP: 'whatsapp',
-  SMS: 'sms',
-  CALL: 'call',
-};
+import { serializeMessage } from '../serializers/inbox.serializer';
 
 @QueryHandler(GetConversationMessagesQuery)
 export class GetConversationMessagesHandler implements IQueryHandler<GetConversationMessagesQuery> {
@@ -31,14 +24,6 @@ export class GetConversationMessagesHandler implements IQueryHandler<GetConversa
       orderBy: { timestamp: 'asc' },
     });
 
-    return messages.map((msg) => ({
-      id: msg.id,
-      conversationId: msg.conversationId,
-      channel: CHANNEL_MAP[msg.channel],
-      direction: msg.direction.toLowerCase() as 'inbound' | 'outbound',
-      content: msg.content,
-      timestamp: msg.timestamp.toISOString(),
-      meta: msg.meta ?? undefined,
-    }));
+    return messages.map(serializeMessage);
   }
 }

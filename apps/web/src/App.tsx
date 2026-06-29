@@ -1,11 +1,13 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Inbox, Loader2 } from "lucide-react";
 import {
   fetchConversations,
   fetchMessages,
   markConversationAsRead,
+  toConversationWithContact,
   type ConversationWithContact,
 } from "./lib/api";
+import { subscribeToInbox } from "./lib/realtime";
 import ConversationList from "./components/ConversationList";
 import MessageThread from "./components/MessageThread";
 import ContactPanel from "./components/ContactPanel";
@@ -21,6 +23,13 @@ function App() {
   const [filterStatus, setFilterStatus] = useState<FilterStatus>("pending");
   const [activeMessages, setActiveMessages] = useState<Message[]>([]);
 
+  // Ref mirror of activeId so the (mount-once) realtime subscription can read
+  // the current selection without re-subscribing on every change.
+  const activeIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    activeIdRef.current = activeId;
+  }, [activeId]);
+
   /** Fetch conversations on mount */
   useEffect(() => {
     fetchConversations()
@@ -31,19 +40,41 @@ function App() {
       .finally(() => setLoading(false));
   }, []);
 
-  /** Fetch messages when the active conversation changes + poll every 5s for inbound */
+  /** Fetch messages when the active conversation changes */
   useEffect(() => {
     if (!activeId) return;
     fetchMessages(activeId).then(setActiveMessages);
-
-    const interval = setInterval(() => {
-      fetchMessages(activeId).then(setActiveMessages);
-      // Also refresh conversation list to update unreadCount / lastMessage
-      fetchConversations().then(setConversations);
-    }, 5000);
-
-    return () => clearInterval(interval);
   }, [activeId]);
+
+  /** Realtime updates via SSE — replaces the previous 5s polling. */
+  useEffect(() => {
+    const unsubscribe = subscribeToInbox({
+      onMessage(message) {
+        // Only append to the thread currently open; dedupe by id so an
+        // optimistically-added outbound message doesn't double.
+        if (message.conversationId !== activeIdRef.current) return;
+
+        setActiveMessages((prev) =>
+          prev.some((mess) => mess.id === message.id)
+            ? prev
+            : [...prev, message],
+        );
+      },
+      onConversation(raw) {
+        const updated = toConversationWithContact(raw);
+        setConversations((prev) => {
+          const others = prev.filter((conv) => conv.id !== updated.id);
+
+          // Re-sort by recency (newest first), matching the backend ordering.
+          return [...others, updated].sort((a, b) =>
+            a.lastMessageAt < b.lastMessageAt ? 1 : -1,
+          );
+        });
+      },
+    });
+
+    return unsubscribe;
+  }, []);
 
   /** Handle conversation selection */
   function handleSelect(id: string) {
@@ -78,7 +109,11 @@ function App() {
 
   /** Handle message sent */
   function handleSent(message: Message) {
-    setActiveMessages((prev) => [...prev, message]);
+    // Dedupe by id: the realtime SSE event for this same outbound message may
+    // already have arrived (it's pushed before the POST response returns).
+    setActiveMessages((prev) =>
+      prev.some((m) => m.id === message.id) ? prev : [...prev, message],
+    );
     setConversations((prev) =>
       prev.map((conv) =>
         conv.id === message.conversationId

@@ -11,6 +11,7 @@ import { SendMessageCommand } from './send-message.command';
 import { extFromFilename } from '../utils/attachment.utils';
 import { StorageService } from '../services/storage.service';
 import { Message } from '@prisma/client';
+import { RealtimeService } from '../../realtime/realtime.service';
 
 @CommandHandler(SendMessageCommand)
 export class SendMessageHandler implements ICommandHandler<SendMessageCommand> {
@@ -21,6 +22,7 @@ export class SendMessageHandler implements ICommandHandler<SendMessageCommand> {
     private readonly twilioService: TwilioService,
     private readonly msGraphMailService: MsGraphMailService,
     private readonly storage: StorageService,
+    private readonly realtime: RealtimeService,
   ) {}
 
   async execute(command: SendMessageCommand): Promise<Message> {
@@ -176,6 +178,11 @@ export class SendMessageHandler implements ICommandHandler<SendMessageCommand> {
         },
       }),
     ]);
+
+    // Realtime push so other connected clients see the outbound message live.
+    // The sending client already appended it optimistically and dedupes by id.
+    this.realtime.emitMessageCreated(message);
+    void this.realtime.emitConversationUpdated(conversationId);
 
     return message;
   }

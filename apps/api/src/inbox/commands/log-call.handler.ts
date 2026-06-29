@@ -3,12 +3,16 @@ import { Logger } from '@nestjs/common';
 import { Message, Prisma } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { LogCallCommand, CallLogStatus } from './log-call.command';
+import { RealtimeService } from '../../realtime/realtime.service';
 
 @CommandHandler(LogCallCommand)
 export class LogCallHandler implements ICommandHandler<LogCallCommand> {
   private readonly logger = new Logger(LogCallHandler.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly realtime: RealtimeService,
+  ) {}
 
   async execute(command: LogCallCommand): Promise<Message> {
     const {
@@ -91,6 +95,10 @@ export class LogCallHandler implements ICommandHandler<LogCallCommand> {
     this.logger.log(
       `[log-call] Logged — callSid=${callSid} direction=${direction} status=${status} phone=${phone}`,
     );
+
+    // Realtime push to connected clients (replaces frontend polling).
+    this.realtime.emitMessageCreated(message);
+    void this.realtime.emitConversationUpdated(conversation.id);
 
     return message;
   }

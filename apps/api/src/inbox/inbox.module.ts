@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { CqrsModule } from '@nestjs/cqrs';
+import { RealtimeModule } from '../realtime/realtime.module';
 
 // Controllers
 import { ConversationsController } from './controllers/conversations.controller';
@@ -40,7 +41,7 @@ const CommandHandlers = [
 const QueryHandlers = [GetConversationsHandler, GetConversationMessagesHandler];
 
 @Module({
-  imports: [CqrsModule],
+  imports: [CqrsModule, RealtimeModule],
   controllers: [
     ConversationsController,
     WebhooksController,

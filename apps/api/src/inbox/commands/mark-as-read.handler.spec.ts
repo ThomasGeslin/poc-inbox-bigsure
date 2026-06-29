@@ -13,13 +13,22 @@ function makePrisma() {
   } as unknown as import('../../../prisma/prisma.service').PrismaService;
 }
 
+function makeRealtime() {
+  return {
+    emitMessageCreated: jest.fn(),
+    emitConversationUpdated: jest.fn().mockResolvedValue(undefined),
+  };
+}
+
 describe('MarkAsReadHandler', () => {
   let handler: MarkAsReadHandler;
   let prisma: ReturnType<typeof makePrisma>;
+  let realtime: ReturnType<typeof makeRealtime>;
 
   beforeEach(() => {
     prisma = makePrisma();
-    handler = new MarkAsReadHandler(prisma);
+    realtime = makeRealtime();
+    handler = new MarkAsReadHandler(prisma, realtime);
   });
 
   it('resets unreadCount to 0 for an existing conversation', async () => {

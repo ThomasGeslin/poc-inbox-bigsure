@@ -65,13 +65,22 @@ function makePrisma() {
   } as unknown as import('../../../prisma/prisma.service').PrismaService;
 }
 
+function makeRealtime() {
+  return {
+    emitMessageCreated: jest.fn(),
+    emitConversationUpdated: jest.fn().mockResolvedValue(undefined),
+  };
+}
+
 describe('ReceiveInboundMessageHandler', () => {
   let handler: ReceiveInboundMessageHandler;
   let prisma: ReturnType<typeof makePrisma>;
+  let realtime: ReturnType<typeof makeRealtime>;
 
   beforeEach(() => {
     prisma = makePrisma();
-    handler = new ReceiveInboundMessageHandler(prisma);
+    realtime = makeRealtime();
+    handler = new ReceiveInboundMessageHandler(prisma, realtime);
   });
 
   describe('first-time inbound from unknown phone number', () => {

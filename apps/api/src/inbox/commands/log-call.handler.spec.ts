@@ -48,20 +48,34 @@ function makePrisma() {
     update: jest.fn(),
   };
   const message = { create: jest.fn() };
-  const $transaction = jest.fn().mockImplementation((ops: Promise<unknown>[]) =>
-    Promise.all(ops),
-  );
+  const $transaction = jest
+    .fn()
+    .mockImplementation((ops: Promise<unknown>[]) => Promise.all(ops));
 
-  return { contact, conversation, message, $transaction } as unknown as import('../../../prisma/prisma.service').PrismaService;
+  return {
+    contact,
+    conversation,
+    message,
+    $transaction,
+  } as unknown as import('../../../prisma/prisma.service').PrismaService;
+}
+
+function makeRealtime() {
+  return {
+    emitMessageCreated: jest.fn(),
+    emitConversationUpdated: jest.fn().mockResolvedValue(undefined),
+  };
 }
 
 describe('LogCallHandler', () => {
   let handler: LogCallHandler;
   let prisma: ReturnType<typeof makePrisma>;
+  let realtime: ReturnType<typeof makeRealtime>;
 
   beforeEach(() => {
     prisma = makePrisma();
-    handler = new LogCallHandler(prisma as never);
+    realtime = makeRealtime();
+    handler = new LogCallHandler(prisma, realtime);
   });
 
   describe('completed inbound call', () => {
@@ -71,12 +85,22 @@ describe('LogCallHandler', () => {
       const message = makeMessage({ content: 'Appel entrant — 2 min 30s' });
 
       (prisma.contact.findFirst as jest.Mock).mockResolvedValue(contact);
-      (prisma.conversation.findFirst as jest.Mock).mockResolvedValue(conversation);
+      (prisma.conversation.findFirst as jest.Mock).mockResolvedValue(
+        conversation,
+      );
       (prisma.message.create as jest.Mock).mockResolvedValue(message);
       (prisma.conversation.update as jest.Mock).mockResolvedValue(conversation);
 
       await handler.execute(
-        new LogCallCommand(PHONE, 'INBOUND', CALL_SID, 'completed', 150, FROM, TO),
+        new LogCallCommand(
+          PHONE,
+          'INBOUND',
+          CALL_SID,
+          'completed',
+          150,
+          FROM,
+          TO,
+        ),
       );
 
       expect(prisma.conversation.update).toHaveBeenCalledWith(
@@ -91,17 +115,29 @@ describe('LogCallHandler', () => {
       const conversation = makeConversation();
 
       (prisma.contact.findFirst as jest.Mock).mockResolvedValue(contact);
-      (prisma.conversation.findFirst as jest.Mock).mockResolvedValue(conversation);
+      (prisma.conversation.findFirst as jest.Mock).mockResolvedValue(
+        conversation,
+      );
       (prisma.message.create as jest.Mock).mockResolvedValue(makeMessage());
       (prisma.conversation.update as jest.Mock).mockResolvedValue(conversation);
 
       await handler.execute(
-        new LogCallCommand(PHONE, 'INBOUND', CALL_SID, 'completed', 150, FROM, TO),
+        new LogCallCommand(
+          PHONE,
+          'INBOUND',
+          CALL_SID,
+          'completed',
+          150,
+          FROM,
+          TO,
+        ),
       );
 
       expect(prisma.message.create).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({ content: 'Appel entrant — 2 min 30s' }),
+          data: expect.objectContaining({
+            content: 'Appel entrant — 2 min 30s',
+          }),
         }),
       );
     });
@@ -113,12 +149,24 @@ describe('LogCallHandler', () => {
       const conversation = makeConversation({ unreadCount: 0 });
 
       (prisma.contact.findFirst as jest.Mock).mockResolvedValue(contact);
-      (prisma.conversation.findFirst as jest.Mock).mockResolvedValue(conversation);
-      (prisma.message.create as jest.Mock).mockResolvedValue(makeMessage({ content: 'Appel manqué' }));
+      (prisma.conversation.findFirst as jest.Mock).mockResolvedValue(
+        conversation,
+      );
+      (prisma.message.create as jest.Mock).mockResolvedValue(
+        makeMessage({ content: 'Appel manqué' }),
+      );
       (prisma.conversation.update as jest.Mock).mockResolvedValue(conversation);
 
       await handler.execute(
-        new LogCallCommand(PHONE, 'INBOUND', CALL_SID, 'no-answer', 0, FROM, TO),
+        new LogCallCommand(
+          PHONE,
+          'INBOUND',
+          CALL_SID,
+          'no-answer',
+          0,
+          FROM,
+          TO,
+        ),
       );
 
       expect(prisma.conversation.update).toHaveBeenCalledWith(
@@ -133,12 +181,22 @@ describe('LogCallHandler', () => {
       const conversation = makeConversation();
 
       (prisma.contact.findFirst as jest.Mock).mockResolvedValue(contact);
-      (prisma.conversation.findFirst as jest.Mock).mockResolvedValue(conversation);
+      (prisma.conversation.findFirst as jest.Mock).mockResolvedValue(
+        conversation,
+      );
       (prisma.message.create as jest.Mock).mockResolvedValue(makeMessage());
       (prisma.conversation.update as jest.Mock).mockResolvedValue(conversation);
 
       await handler.execute(
-        new LogCallCommand(PHONE, 'INBOUND', CALL_SID, 'no-answer', 0, FROM, TO),
+        new LogCallCommand(
+          PHONE,
+          'INBOUND',
+          CALL_SID,
+          'no-answer',
+          0,
+          FROM,
+          TO,
+        ),
       );
 
       expect(prisma.message.create).toHaveBeenCalledWith(
@@ -155,12 +213,24 @@ describe('LogCallHandler', () => {
       const conversation = makeConversation();
 
       (prisma.contact.findFirst as jest.Mock).mockResolvedValue(contact);
-      (prisma.conversation.findFirst as jest.Mock).mockResolvedValue(conversation);
-      (prisma.message.create as jest.Mock).mockResolvedValue(makeMessage({ direction: 'OUTBOUND' }));
+      (prisma.conversation.findFirst as jest.Mock).mockResolvedValue(
+        conversation,
+      );
+      (prisma.message.create as jest.Mock).mockResolvedValue(
+        makeMessage({ direction: 'OUTBOUND' }),
+      );
       (prisma.conversation.update as jest.Mock).mockResolvedValue(conversation);
 
       await handler.execute(
-        new LogCallCommand(PHONE, 'OUTBOUND', CALL_SID, 'completed', 60, FROM, TO),
+        new LogCallCommand(
+          PHONE,
+          'OUTBOUND',
+          CALL_SID,
+          'completed',
+          60,
+          FROM,
+          TO,
+        ),
       );
 
       expect(prisma.conversation.update).toHaveBeenCalledWith(
@@ -175,17 +245,29 @@ describe('LogCallHandler', () => {
       const conversation = makeConversation();
 
       (prisma.contact.findFirst as jest.Mock).mockResolvedValue(contact);
-      (prisma.conversation.findFirst as jest.Mock).mockResolvedValue(conversation);
+      (prisma.conversation.findFirst as jest.Mock).mockResolvedValue(
+        conversation,
+      );
       (prisma.message.create as jest.Mock).mockResolvedValue(makeMessage());
       (prisma.conversation.update as jest.Mock).mockResolvedValue(conversation);
 
       await handler.execute(
-        new LogCallCommand(PHONE, 'OUTBOUND', CALL_SID, 'completed', 60, FROM, TO),
+        new LogCallCommand(
+          PHONE,
+          'OUTBOUND',
+          CALL_SID,
+          'completed',
+          60,
+          FROM,
+          TO,
+        ),
       );
 
       expect(prisma.message.create).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({ content: 'Appel sortant — 1 min 0s' }),
+          data: expect.objectContaining({
+            content: 'Appel sortant — 1 min 0s',
+          }),
         }),
       );
     });
@@ -197,17 +279,29 @@ describe('LogCallHandler', () => {
       const conversation = makeConversation();
 
       (prisma.contact.findFirst as jest.Mock).mockResolvedValue(contact);
-      (prisma.conversation.findFirst as jest.Mock).mockResolvedValue(conversation);
+      (prisma.conversation.findFirst as jest.Mock).mockResolvedValue(
+        conversation,
+      );
       (prisma.message.create as jest.Mock).mockResolvedValue(makeMessage());
       (prisma.conversation.update as jest.Mock).mockResolvedValue(conversation);
 
       await handler.execute(
-        new LogCallCommand(PHONE, 'OUTBOUND', CALL_SID, 'no-answer', 0, FROM, TO),
+        new LogCallCommand(
+          PHONE,
+          'OUTBOUND',
+          CALL_SID,
+          'no-answer',
+          0,
+          FROM,
+          TO,
+        ),
       );
 
       expect(prisma.message.create).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({ content: 'Appel sortant — sans réponse' }),
+          data: expect.objectContaining({
+            content: 'Appel sortant — sans réponse',
+          }),
         }),
       );
       expect(prisma.conversation.update).toHaveBeenCalledWith(
@@ -231,7 +325,15 @@ describe('LogCallHandler', () => {
       (prisma.conversation.update as jest.Mock).mockResolvedValue(conversation);
 
       await handler.execute(
-        new LogCallCommand(PHONE, 'INBOUND', CALL_SID, 'completed', 30, FROM, TO),
+        new LogCallCommand(
+          PHONE,
+          'INBOUND',
+          CALL_SID,
+          'completed',
+          30,
+          FROM,
+          TO,
+        ),
       );
 
       expect(prisma.contact.create).toHaveBeenCalledWith({
@@ -247,12 +349,23 @@ describe('LogCallHandler', () => {
       const recordingUrl = 'https://api.twilio.com/recordings/RE123.mp3';
 
       (prisma.contact.findFirst as jest.Mock).mockResolvedValue(contact);
-      (prisma.conversation.findFirst as jest.Mock).mockResolvedValue(conversation);
+      (prisma.conversation.findFirst as jest.Mock).mockResolvedValue(
+        conversation,
+      );
       (prisma.message.create as jest.Mock).mockResolvedValue(makeMessage());
       (prisma.conversation.update as jest.Mock).mockResolvedValue(conversation);
 
       await handler.execute(
-        new LogCallCommand(PHONE, 'INBOUND', CALL_SID, 'completed', 90, FROM, TO, recordingUrl),
+        new LogCallCommand(
+          PHONE,
+          'INBOUND',
+          CALL_SID,
+          'completed',
+          90,
+          FROM,
+          TO,
+          recordingUrl,
+        ),
       );
 
       expect(prisma.message.create).toHaveBeenCalledWith(

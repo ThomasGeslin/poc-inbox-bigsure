@@ -3,6 +3,7 @@ import { Logger } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { ReceiveMailCommand } from './receive-mail.command';
 import { Message, Prisma } from '@prisma/client';
+import { RealtimeService } from '../../realtime/realtime.service';
 
 // Type of the interactive transaction client
 type Tx = Parameters<Parameters<PrismaService['$transaction']>[0]>[0];
@@ -11,7 +12,10 @@ type Tx = Parameters<Parameters<PrismaService['$transaction']>[0]>[0];
 export class ReceiveMailHandler implements ICommandHandler<ReceiveMailCommand> {
   private readonly logger = new Logger(ReceiveMailHandler.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly realtime: RealtimeService,
+  ) {}
 
   async execute(command: ReceiveMailCommand): Promise<Message> {
     const {
@@ -47,7 +51,11 @@ export class ReceiveMailHandler implements ICommandHandler<ReceiveMailCommand> {
     // messages.external_id. Postgres then rolls back the ENTIRE transaction
     // for the loser — contact and conversation included — so no duplicates.
     try {
-      return await this.prisma.$transaction(async (tx) => {
+      // Captured inside the transaction so we can emit a realtime event for
+      // the affected conversation once the write has committed.
+      let createdConversationId: string | undefined;
+
+      const message = await this.prisma.$transaction(async (tx) => {
         // 1. Find or create Contact
         let contact = await tx.contact.findFirst({
           where: { email: { equals: from, mode: 'insensitive' } },
@@ -125,8 +133,17 @@ export class ReceiveMailHandler implements ICommandHandler<ReceiveMailCommand> {
           },
         });
 
+        createdConversationId = conversation.id;
         return message;
       });
+
+      // Realtime push for the freshly stored inbound mail (replaces polling).
+      this.realtime.emitMessageCreated(message);
+      if (createdConversationId) {
+        void this.realtime.emitConversationUpdated(createdConversationId);
+      }
+
+      return message;
     } catch (err) {
       // UNIQUE constraint on externalId → whole transaction was rolled back.
       // Return the message stored by the winning concurrent thread.

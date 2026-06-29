@@ -90,23 +90,33 @@ function makeStorage() {
   };
 }
 
+function makeRealtime() {
+  return {
+    emitMessageCreated: jest.fn(),
+    emitConversationUpdated: jest.fn().mockResolvedValue(undefined),
+  };
+}
+
 describe('SendMessageHandler', () => {
   let handler: SendMessageHandler;
   let prisma: ReturnType<typeof makePrisma>;
   let twilio: ReturnType<typeof makeTwilio>;
   let graph: ReturnType<typeof makeGraph>;
   let storage: ReturnType<typeof makeStorage>;
+  let realtime: ReturnType<typeof makeRealtime>;
 
   beforeEach(() => {
     prisma = makePrisma();
     twilio = makeTwilio();
     graph = makeGraph();
     storage = makeStorage();
+    realtime = makeRealtime();
     handler = new SendMessageHandler(
       prisma,
       twilio as never,
       graph as never,
       storage as never,
+      realtime as never,
     );
   });
 

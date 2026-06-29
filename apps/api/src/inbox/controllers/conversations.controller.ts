@@ -20,6 +20,7 @@ import { GetConversationsQuery } from '../queries/get-conversations.query';
 import { GetConversationMessagesQuery } from '../queries/get-conversation-messages.query';
 import { SendMessageDto } from '../dto/send-message.dto';
 import { isAcceptedAttachmentType } from '../utils/attachment.utils';
+import { serializeMessage } from '../serializers/inbox.serializer';
 import { ConversationStatus, Channel, Message } from '@prisma/client';
 
 const CHANNEL_INPUT_MAP: Record<string, Channel> = {
@@ -78,16 +79,8 @@ export class ConversationsController {
     const message: Message = await this.commandBus.execute(
       new SendMessageCommand(id, channel, dto.content, dto.subject, files),
     );
-    // Normalize to lowercase for frontend consistency (same as query handlers)
-    return {
-      ...message,
-      channel: message.channel.toLowerCase(),
-      direction: message.direction.toLowerCase(),
-      timestamp:
-        message.timestamp instanceof Date
-          ? message.timestamp.toISOString()
-          : message.timestamp,
-    };
+    // Same serialization as the query handlers and the realtime stream.
+    return serializeMessage(message);
   }
 
   @Patch(':id/status')

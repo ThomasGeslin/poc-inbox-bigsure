@@ -7,12 +7,16 @@ import {
   parsePhoneNumberWithError,
   isValidPhoneNumber,
 } from 'libphonenumber-js';
+import { RealtimeService } from '../../realtime/realtime.service';
 
 @CommandHandler(ReceiveInboundMessageCommand)
 export class ReceiveInboundMessageHandler implements ICommandHandler<ReceiveInboundMessageCommand> {
   private readonly logger = new Logger(ReceiveInboundMessageHandler.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly realtime: RealtimeService,
+  ) {}
 
   async execute(command: ReceiveInboundMessageCommand): Promise<Message> {
     const { phone, channel, content, meta } = command;
@@ -104,6 +108,10 @@ export class ReceiveInboundMessageHandler implements ICommandHandler<ReceiveInbo
         },
       }),
     ]);
+
+    // Realtime push to connected clients (replaces frontend polling).
+    this.realtime.emitMessageCreated(message);
+    void this.realtime.emitConversationUpdated(conversation.id);
 
     return message;
   }

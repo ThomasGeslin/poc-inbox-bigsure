@@ -13,13 +13,22 @@ function makePrisma() {
   } as unknown as import('../../../prisma/prisma.service').PrismaService;
 }
 
+function makeRealtime() {
+  return {
+    emitMessageCreated: jest.fn(),
+    emitConversationUpdated: jest.fn().mockResolvedValue(undefined),
+  };
+}
+
 describe('UpdateConversationStatusHandler', () => {
   let handler: UpdateConversationStatusHandler;
   let prisma: ReturnType<typeof makePrisma>;
+  let realtime: ReturnType<typeof makeRealtime>;
 
   beforeEach(() => {
     prisma = makePrisma();
-    handler = new UpdateConversationStatusHandler(prisma as never);
+    realtime = makeRealtime();
+    handler = new UpdateConversationStatusHandler(prisma as never, realtime as never);
   });
 
   it('throws NotFoundException when conversation does not exist', async () => {
