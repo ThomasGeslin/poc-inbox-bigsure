@@ -1,6 +1,6 @@
 # poc-inbox
 
-A fullstack monorepo POC for an inbox-style conversation management interface. It handles multi-channel communications (email, WhatsApp, SMS, calls) with contact management and conversation tracking.
+A fullstack monorepo POC for an inbox-style conversation management interface. It handles multi-channel communications (email, WhatsApp, SMS, calls) with contact management and conversation tracking. The inbox updates in real time over Server-Sent Events, and messages can carry image/PDF attachments across every channel.
 
 ## Repository Structure
 
@@ -18,13 +18,17 @@ This project uses **npm workspaces** to manage both apps from the root.
 
 ## Tech Stack
 
-| Layer    | Technology                                  |
-| -------- | ------------------------------------------- |
-| Frontend | React 19, TypeScript, Vite, Tailwind CSS v4 |
-| Backend  | NestJS 11, TypeScript, CQRS                 |
-| Database | PostgreSQL via Prisma ORM                   |
-| Icons    | Lucide React                                |
-| Testing  | Jest, Supertest                             |
+| Layer    | Technology                                                |
+| -------- | --------------------------------------------------------- |
+| Frontend | React 19, TypeScript, Vite, Tailwind CSS v4               |
+| Backend  | NestJS 11, TypeScript, CQRS                               |
+| Database | PostgreSQL via Prisma ORM                                 |
+| Email    | Microsoft 365 / Microsoft Graph (Entra app registration)  |
+| SMS / WhatsApp / Voice | Twilio                                      |
+| Attachments | Supabase Storage                                       |
+| Realtime | Server-Sent Events (SSE)                                  |
+| Icons    | Lucide React                                              |
+| Testing  | Jest, Supertest                                           |
 
 ---
 
@@ -32,9 +36,10 @@ This project uses **npm workspaces** to manage both apps from the root.
 
 - **Node.js** >= 18
 - **npm** >= 9 (workspaces support)
-- **PostgreSQL** instance — a [Supabase](https://supabase.com) free project works well
+- A [Supabase](https://supabase.com) free project — provides both the **PostgreSQL** database and the **Storage** bucket used for attachments
 - **[ngrok](https://ngrok.com)** (or equivalent) to expose your local API for webhooks during development
-- Accounts on [Twilio](https://twilio.com), [Cloudmailin](https://www.cloudmailin.com), and [Resend](https://resend.com)
+- A [Twilio](https://twilio.com) account (SMS, WhatsApp, Voice)
+- A **Microsoft Entra (Azure AD) app registration** with application-level Microsoft Graph mail permissions, for sending and receiving email through a Microsoft 365 mailbox
 
 ---
 
@@ -59,38 +64,48 @@ cp apps/api/.env.example apps/api/.env
 Full reference for `apps/api/.env`:
 
 ```env
-# ── Database ────────────────────────────────────────────────────────────────
-# Supabase connection pooler URL (port 6543 for Transaction mode)
+# ── Database (Supabase) ──────────────────────────────────────────────────────
+# Connection pooler URL (port 6543, Transaction mode) — used at runtime
 DATABASE_URL="postgresql://USER:PASSWORD@HOST:6543/DATABASE?pgbouncer=true"
+# Direct connection (port 5432) — used by Prisma for migrations
+DIRECT_URL="postgresql://USER:PASSWORD@HOST:5432/postgres"
+
+# ── Supabase Storage (attachments) ───────────────────────────────────────────
+# The secret key is server-side only — never expose it to the frontend.
+# Settings → API Keys: Project URL + a "secret key" (sb_secret_…)
+SUPABASE_URL="https://YOUR_PROJECT_REF.supabase.co"
+SUPABASE_SECRET_KEY="sb_secret_..."
+# Public storage bucket name (create it in the Supabase dashboard, set to public)
+SUPABASE_STORAGE_BUCKET="attachments"
 
 # ── App ─────────────────────────────────────────────────────────────────────
 PORT=3000
-# Public base URL of this API (used to build webhook callback URLs for Twilio)
+# Public base URL of this API (used to build webhook callback URLs)
 # Use your ngrok / production URL — no trailing slash
-APP_PUBLIC_URL="https://your-ngrok-subdomain.ngrok-free.app"
+APP_PUBLIC_URL="https://your-ngrok-or-domain.example.com"
 
-# ── Twilio ───────────────────────────────────────────────────────────────────
+# ── Twilio (SMS, WhatsApp, Voice) ────────────────────────────────────────────
 TWILIO_ACCOUNT_SID="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 TWILIO_AUTH_TOKEN="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-# Your Twilio phone number for SMS (E.164 format)
+# Base URL Twilio uses to sign requests (defaults to APP_PUBLIC_URL if unset)
+TWILIO_WEBHOOK_BASE_URL="https://your-ngrok-or-domain.example.com"
+# SMS sender number (E.164 format)
 TWILIO_SMS_NUMBER="+33XXXXXXXXX"
-# Your Twilio WhatsApp-enabled number (sandbox or approved sender)
+# WhatsApp sender number — the "whatsapp:" prefix is added automatically if missing
 TWILIO_WHATSAPP_NUMBER="whatsapp:+14155238886"
-# Your Twilio number for voice calls
+# Voice number — can be the same as the SMS number if it supports both
 TWILIO_VOICE_NUMBER="+33XXXXXXXXX"
-# The real phone number inbound calls are forwarded to
+# Real phone number inbound calls are forwarded to (E.164 format)
 TWILIO_FORWARD_NUMBER="+33XXXXXXXXX"
 
-# ── Resend ───────────────────────────────────────────────────────────────────
-RESEND_API_KEY="re_xxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-# Verified sender address in your Resend domain
-RESEND_FROM_EMAIL="contact@yourdomain.com"
-# Webhook signing secret (from Resend dashboard → Webhooks)
-RESEND_INBOUND_WEBHOOK_SECRET="whsec_xxxxxxxxxxxx"
-
-# ── Cloudmailin ──────────────────────────────────────────────────────────────
-# The inbound address assigned to your Cloudmailin target
-CLOUDMAILIN_ADDRESS="xxxxxxxx@cloudmailin.net"
+# ── Microsoft Entra / Graph (email send + receive) ───────────────────────────
+ENTRA_CLIENT_SECRET="xxxxxxxxxxxxxxxx"
+ENTRA_CLIENT_ID="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+ENTRA_TENANT_ID="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+# Arbitrary shared secret echoed back as `clientState` on every Graph notification
+MS_GRAPH_WEBHOOK_SECRET="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+# Mailbox used as the default sender and watched for inbound mail
+TEST_MAIL="your-mailbox@yourdomain.com"
 ```
 
 ### 3. Run database migrations
@@ -120,7 +135,7 @@ npm run dev:web   # Vite dev server on http://localhost:5173
 
 ## Webhook Setup
 
-The API exposes three inbound webhook endpoints that external services must be able to reach. During local development, expose port 3000 with ngrok:
+The API exposes inbound webhook endpoints that external services (Twilio and Microsoft Graph) must be able to reach. During local development, expose port 3000 with ngrok:
 
 ```bash
 ngrok http 3000
@@ -135,51 +150,62 @@ All Twilio configuration is done in the [Twilio Console](https://console.twilio.
 | Channel  | Setting                      | Value                                                            |
 | -------- | ---------------------------- | ---------------------------------------------------------------- |
 | SMS      | Webhook — A message comes in | `POST https://<APP_PUBLIC_URL>/api/webhooks/twilio/sms`          |
-| WhatsApp | Webhook — A message comes in | `POST https://<APP_PUBLIC_URL>/api/webhooks/twilio/whatsapp`     |
+| WhatsApp | Webhook — A message comes in | `POST https://<APP_PUBLIC_URL>/api/webhooks/twilio/inbound`      |
 | Voice    | Webhook — A call comes in    | `POST https://<APP_PUBLIC_URL>/api/webhooks/twilio/voice`        |
 | Voice    | Status callback URL          | `POST https://<APP_PUBLIC_URL>/api/webhooks/twilio/voice/status` |
+
+> The `twilio/inbound` endpoint auto-detects SMS vs WhatsApp from the `whatsapp:` prefix, so it can also serve as a single combined messaging webhook.
 
 Steps:
 
 1. Open **Phone Numbers → Manage → Active numbers** and select the number.
 2. Under **Messaging**, set the webhook URL for SMS.
-3. For **WhatsApp**, go to **Messaging → Try it out → Send a WhatsApp message** (sandbox) and set the webhook URL.
+3. For **WhatsApp**, go to **Messaging → Try it out → Send a WhatsApp message** (sandbox) and set the webhook URL to the `twilio/inbound` endpoint.
 4. Under **Voice**, set both the call-comes-in webhook and the status-callback URL.
 5. Make sure the HTTP method is **POST** for every entry.
 
+Inbound media (MMS / WhatsApp images and PDFs) are downloaded from Twilio and re-uploaded to Supabase Storage, then attached to the stored message.
+
 > Twilio signs every request with an `X-Twilio-Signature` header. The API validates it using `TWILIO_AUTH_TOKEN`. Requests with an invalid signature are rejected with `401 Unauthorized`.
 
-### Cloudmailin (Inbound email)
+### Microsoft 365 / Microsoft Graph (Email send + receive)
 
-Cloudmailin delivers inbound emails to the API as HTTP POST requests.
+Email is sent and received through a Microsoft 365 mailbox using the Microsoft Graph API, authenticated with a **Microsoft Entra (Azure AD) app registration** (client credentials flow — no user sign-in).
 
-1. Create a free account at [cloudmailin.com](https://www.cloudmailin.com).
-2. Create an **Address** — Cloudmailin assigns an address like `xxxxxxxx@cloudmailin.net`. Set this as `CLOUDMAILIN_ADDRESS` in `.env`.
-3. Set the **Target URL** to:
-   ```
-   POST https://<APP_PUBLIC_URL>/api/webhooks/mail/inbound
-   ```
-4. Set the **Post Format** to **JSON** (the API parses the body as `application/json`).
-5. Share the `CLOUDMAILIN_ADDRESS` with contacts so their emails are routed here.
+#### Entra app registration
 
-### Resend (Outbound email + Inbound webhook)
+1. In the [Entra admin center](https://entra.microsoft.com), go to **Applications → App registrations → New registration**.
+2. Copy the **Application (client) ID** → `ENTRA_CLIENT_ID` and the **Directory (tenant) ID** → `ENTRA_TENANT_ID`.
+3. Under **Certificates & secrets**, create a **client secret** → `ENTRA_CLIENT_SECRET`.
+4. Under **API permissions**, add the **Application** Microsoft Graph permissions `Mail.Read` and `Mail.Send` (`Mail.ReadWrite` if you need to mark/move messages), then **grant admin consent**.
+5. Set `TEST_MAIL` to the mailbox the app should send from and watch for inbound mail.
 
-Resend is used both to **send** outbound emails and to receive **inbound delivery events**.
+#### Inbound mail (Graph change notifications)
 
-#### Sending emails
+Rather than a manually configured webhook, the API **registers a Graph change-notification subscription automatically on startup** (see `MsGraphMailService.registerSubscriptions`, called from [main.ts](apps/api/src/main.ts) once the server is listening). Graph then POSTs notifications to:
 
-1. Create an account at [resend.com](https://resend.com) and obtain an API key → set as `RESEND_API_KEY`.
-2. Add and verify your sending domain, then set `RESEND_FROM_EMAIL` to a verified address on that domain.
+```
+POST https://<APP_PUBLIC_URL>/api/webhooks/ms-graph/mail
+```
 
-#### Inbound webhook (delivery events / inbound routing)
+What you need to know:
 
-1. In the Resend dashboard, go to **Webhooks** and create a new endpoint pointing to:
-   ```
-   POST https://<APP_PUBLIC_URL>/api/webhooks/resend/inbound
-   ```
-2. Copy the **Signing Secret** and set it as `RESEND_INBOUND_WEBHOOK_SECRET` in `.env`.
+- `APP_PUBLIC_URL` must be reachable from the internet **before the API starts**, because Graph performs a validation handshake (it calls the endpoint with a `?validationToken=…` query param, which the API echoes back verbatim).
+- `MS_GRAPH_WEBHOOK_SECRET` is sent as the subscription's `clientState`; the API rejects any notification whose `clientState` doesn't match.
+- Subscriptions are short-lived (~3 days), so the service auto-renews them every 2 days.
+- On each notification the API fetches the full message from Graph, strips the quoted reply chain, downloads image/PDF attachments to Supabase Storage, and dispatches a `ReceiveMailCommand`.
 
-> The API verifies the `svix-signature` header on every Resend webhook request. Requests with an invalid signature are rejected.
+---
+
+## Realtime (SSE)
+
+The inbox updates live over **Server-Sent Events** instead of polling. The API exposes a single stream:
+
+```
+GET https://<APP_PUBLIC_URL>/api/realtime/stream
+```
+
+The backend pushes `message.created` and `conversation.updated` events whose payloads match the REST response shapes, so the frontend applies them to state directly. The browser uses a native `EventSource`, which reconnects automatically on connection drop. See [realtime.service.ts](apps/api/src/realtime/realtime.service.ts) and [realtime.ts](apps/web/src/lib/realtime.ts).
 
 ---
 
@@ -191,12 +217,16 @@ A NestJS application structured around the **CQRS** pattern.
 
 #### Key dependencies
 
-| Package          | Role                         |
-| ---------------- | ---------------------------- |
-| `@nestjs/common` | Core NestJS framework        |
-| `@nestjs/cqrs`   | Command/Query Responsibility |
-| `@prisma/client` | Type-safe database client    |
-| `prisma`         | ORM & migration tooling      |
+| Package                 | Role                                          |
+| ----------------------- | --------------------------------------------- |
+| `@nestjs/common`        | Core NestJS framework                         |
+| `@nestjs/cqrs`          | Command/Query Responsibility Segregation      |
+| `@prisma/client`        | Type-safe database client                     |
+| `prisma`                | ORM & migration tooling                       |
+| `twilio`                | SMS / WhatsApp / Voice + signature validation |
+| `@supabase/supabase-js` | Supabase Storage client (attachments)         |
+| `axios`                 | HTTP client for Microsoft Graph & media fetch |
+| `libphonenumber-js`     | Phone number parsing / E.164 normalization    |
 
 #### Available scripts
 
@@ -253,12 +283,13 @@ A React 19 SPA built with **Vite**, styled with **Tailwind CSS v4**, providing a
 
 #### Key dependencies
 
-| Package          | Role                        |
-| ---------------- | --------------------------- |
-| `react` 19       | UI framework                |
-| `vite` 8         | Build tool & dev server     |
-| `tailwindcss` v4 | Utility-first CSS framework |
-| `lucide-react`   | Icon library                |
+| Package                    | Role                                    |
+| -------------------------- | --------------------------------------- |
+| `react` 19                 | UI framework                            |
+| `vite` 8                   | Build tool & dev server                 |
+| `tailwindcss` v4           | Utility-first CSS framework             |
+| `lucide-react`             | Icon library                            |
+| `react-phone-number-input` | International phone input with E.164 output |
 
 #### Available scripts
 
@@ -280,22 +311,29 @@ npm run lint --workspace=apps/web
 
 ```
 apps/web/src/
-├── components/         # UI components
+├── components/             # UI components
 │   ├── Avatar.tsx
 │   ├── ChannelIcon.tsx
 │   ├── ContactPanel.tsx
 │   ├── ConversationItem.tsx
 │   ├── ConversationList.tsx
+│   ├── CreateContactModal.tsx
+│   ├── EditContactModal.tsx
 │   ├── MessageBubble.tsx
 │   ├── MessageThread.tsx
+│   ├── PhoneInputField.tsx     # International phone input (E.164)
 │   ├── ReplyBox.tsx
-│   └── StatusBadge.tsx
-├── data/
-│   └── mockData.ts     # Local mock data for development
+│   ├── StatusBadge.tsx
+│   ├── Toaster.tsx             # Toast notifications
+│   ├── ToastContext.ts
+│   └── useToast.ts
+├── lib/
+│   ├── api.ts              # REST client for the API
+│   └── realtime.ts         # SSE subscription (EventSource)
 ├── types/
-│   └── index.ts        # Shared TypeScript types
+│   └── index.ts            # Shared TypeScript types
 ├── utils/
-│   └── helpers.ts      # Utility functions
+│   └── helpers.ts          # Utility functions
 ├── App.tsx
 └── main.tsx
 ```
