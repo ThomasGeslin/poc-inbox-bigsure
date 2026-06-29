@@ -9,5 +9,7 @@ export class ReceiveMailCommand {
     public readonly senderName?: string,
     /** Graph internal message ID (used to reply via Graph API) */
     public readonly graphMessageId?: string,
+    /** Public URLs of downloaded image attachments */
+    public readonly attachmentUrls?: string[],
   ) {}
 }

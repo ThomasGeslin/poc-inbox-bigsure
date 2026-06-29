@@ -81,17 +81,33 @@ function makeGraph() {
   };
 }
 
+const STORAGE_URL =
+  'https://project.supabase.co/storage/v1/object/public/attachments/file.jpg';
+
+function makeStorage() {
+  return {
+    upload: jest.fn().mockResolvedValue(STORAGE_URL),
+  };
+}
+
 describe('SendMessageHandler', () => {
   let handler: SendMessageHandler;
   let prisma: ReturnType<typeof makePrisma>;
   let twilio: ReturnType<typeof makeTwilio>;
   let graph: ReturnType<typeof makeGraph>;
+  let storage: ReturnType<typeof makeStorage>;
 
   beforeEach(() => {
     prisma = makePrisma();
     twilio = makeTwilio();
     graph = makeGraph();
-    handler = new SendMessageHandler(prisma, twilio as never, graph as never);
+    storage = makeStorage();
+    handler = new SendMessageHandler(
+      prisma,
+      twilio as never,
+      graph as never,
+      storage as never,
+    );
   });
 
   describe('conversation not found', () => {
@@ -124,6 +140,7 @@ describe('SendMessageHandler', () => {
         EMAIL,
         expect.any(String),
         expect.any(String),
+        { attachments: undefined },
       );
       expect(graph.replyToMessage).not.toHaveBeenCalled();
       expect(result).toEqual(message);
@@ -152,6 +169,7 @@ describe('SendMessageHandler', () => {
         DEFAULT_FROM,
         'graph-msg-123',
         expect.any(String),
+        undefined,
       );
       expect(graph.sendEmail).not.toHaveBeenCalled();
     });
@@ -253,7 +271,11 @@ describe('SendMessageHandler', () => {
         new SendMessageCommand(CONV_ID, 'SMS', 'Your quote is ready'),
       );
 
-      expect(twilio.sendSms).toHaveBeenCalledWith(PHONE, 'Your quote is ready');
+      expect(twilio.sendSms).toHaveBeenCalledWith(
+        PHONE,
+        'Your quote is ready',
+        undefined,
+      );
       expect(twilio.sendWhatsApp).not.toHaveBeenCalled();
     });
 
@@ -306,8 +328,168 @@ describe('SendMessageHandler', () => {
         new SendMessageCommand(CONV_ID, 'WHATSAPP', 'Hello on WA'),
       );
 
-      expect(twilio.sendWhatsApp).toHaveBeenCalledWith(PHONE, 'Hello on WA');
+      expect(twilio.sendWhatsApp).toHaveBeenCalledWith(
+        PHONE,
+        'Hello on WA',
+        undefined,
+      );
       expect(twilio.sendSms).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('subject backfill', () => {
+    it('backfills the conversation subject when it was previously blank', async () => {
+      const conversation = makeConversation({ subject: '' });
+      (prisma.conversation.findUnique as jest.Mock).mockResolvedValue(
+        conversation,
+      );
+      (prisma.message.findFirst as jest.Mock).mockResolvedValue(null);
+      (prisma.message.create as jest.Mock).mockResolvedValue(makeMessage());
+      (prisma.conversation.update as jest.Mock).mockResolvedValue(conversation);
+
+      await handler.execute(
+        new SendMessageCommand(CONV_ID, 'MAIL', 'Hi', 'New subject'),
+      );
+
+      const updateArg = (prisma.conversation.update as jest.Mock).mock
+        .calls[0][0];
+      expect(updateArg.data).toMatchObject({ subject: 'New subject' });
+    });
+
+    it('does NOT overwrite an existing conversation subject', async () => {
+      const conversation = makeConversation({ subject: 'Existing subject' });
+      (prisma.conversation.findUnique as jest.Mock).mockResolvedValue(
+        conversation,
+      );
+      (prisma.message.findFirst as jest.Mock).mockResolvedValue(null);
+      (prisma.message.create as jest.Mock).mockResolvedValue(makeMessage());
+      (prisma.conversation.update as jest.Mock).mockResolvedValue(conversation);
+
+      await handler.execute(
+        new SendMessageCommand(CONV_ID, 'MAIL', 'Hi', 'New subject'),
+      );
+
+      const updateArg = (prisma.conversation.update as jest.Mock).mock
+        .calls[0][0];
+      expect(updateArg.data.subject).toBeUndefined();
+    });
+  });
+
+  describe('attachments', () => {
+    const makeFile = (overrides: Partial<Express.Multer.File> = {}) =>
+      ({
+        originalname: 'photo.jpg',
+        mimetype: 'image/jpeg',
+        buffer: Buffer.from('image-bytes'),
+        ...overrides,
+      }) as Express.Multer.File;
+
+    it('forwards attachments to Graph when sending a new email', async () => {
+      const conversation = makeConversation();
+      const files = [
+        makeFile(),
+        makeFile({ originalname: 'doc.pdf', mimetype: 'application/pdf' }),
+      ];
+
+      (prisma.conversation.findUnique as jest.Mock).mockResolvedValue(
+        conversation,
+      );
+      (prisma.message.findFirst as jest.Mock).mockResolvedValue(null);
+      (prisma.message.create as jest.Mock).mockResolvedValue(makeMessage());
+      (prisma.conversation.update as jest.Mock).mockResolvedValue(conversation);
+
+      await handler.execute(
+        new SendMessageCommand(CONV_ID, 'MAIL', 'Hi', undefined, files),
+      );
+
+      expect(graph.sendEmail).toHaveBeenCalledWith(
+        EMAIL,
+        expect.any(String),
+        expect.any(String),
+        { attachments: files },
+      );
+    });
+
+    it('forwards attachments to the Graph reply when threading', async () => {
+      const conversation = makeConversation();
+      const priorMessage = makeMessage({
+        id: 'msg-0',
+        channel: 'MAIL',
+        meta: { messageId: '<prior@poc-inbox>', graphId: 'graph-msg-123' },
+      });
+      const files = [makeFile()];
+
+      (prisma.conversation.findUnique as jest.Mock).mockResolvedValue(
+        conversation,
+      );
+      (prisma.message.findFirst as jest.Mock).mockResolvedValue(priorMessage);
+      (prisma.message.create as jest.Mock).mockResolvedValue(makeMessage());
+      (prisma.conversation.update as jest.Mock).mockResolvedValue(conversation);
+
+      await handler.execute(
+        new SendMessageCommand(CONV_ID, 'MAIL', 'Reply', undefined, files),
+      );
+
+      expect(graph.replyToMessage).toHaveBeenCalledWith(
+        DEFAULT_FROM,
+        'graph-msg-123',
+        expect.any(String),
+        files,
+      );
+    });
+
+    it('uploads attachments and sends WhatsApp with absolute media URLs', async () => {
+      const conversation = makeConversation({
+        channel: 'WHATSAPP',
+        contact: makeContact(),
+      });
+      const files = [makeFile()];
+
+      (prisma.conversation.findUnique as jest.Mock).mockResolvedValue(
+        conversation,
+      );
+      (prisma.message.create as jest.Mock).mockResolvedValue(
+        makeMessage({ channel: 'WHATSAPP' }),
+      );
+      (prisma.conversation.update as jest.Mock).mockResolvedValue(conversation);
+
+      await handler.execute(
+        new SendMessageCommand(CONV_ID, 'WHATSAPP', 'Photo', undefined, files),
+      );
+
+      // The attachment is uploaded to storage…
+      expect(storage.upload).toHaveBeenCalledWith(
+        files[0].buffer,
+        'image/jpeg',
+        'jpg',
+      );
+      // …and its public URL is passed to Twilio as the WhatsApp media URL.
+      expect(twilio.sendWhatsApp).toHaveBeenCalledWith(PHONE, 'Photo', [
+        STORAGE_URL,
+      ]);
+    });
+
+    it('persists media URLs in the outbound message meta', async () => {
+      const conversation = makeConversation({
+        channel: 'WHATSAPP',
+        contact: makeContact(),
+      });
+      const files = [makeFile()];
+
+      (prisma.conversation.findUnique as jest.Mock).mockResolvedValue(
+        conversation,
+      );
+      (prisma.message.create as jest.Mock).mockResolvedValue(
+        makeMessage({ channel: 'WHATSAPP' }),
+      );
+      (prisma.conversation.update as jest.Mock).mockResolvedValue(conversation);
+
+      await handler.execute(
+        new SendMessageCommand(CONV_ID, 'WHATSAPP', 'Photo', undefined, files),
+      );
+
+      const createArg = (prisma.message.create as jest.Mock).mock.calls[0][0];
+      expect(createArg.data.meta.mediaUrls).toEqual([STORAGE_URL]);
     });
   });
 });

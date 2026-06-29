@@ -1,10 +1,12 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   Send,
   Paperclip,
   Mail,
   MessageSquare,
   MessageCircle,
+  FileText,
+  X,
 } from "lucide-react";
 import type { Channel, Message } from "../types";
 import { sendMessage } from "../lib/api";
@@ -47,6 +49,23 @@ export default function ReplyBox({
   const [body, setBody] = useState("");
   const [subject, setSubject] = useState("");
   const [sending, setSending] = useState(false);
+  const [attachments, setAttachments] = useState<File[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Only mail and whatsapp support attachments (SMS technically supports MMS but
+  // let's restrict to channels where it's well-supported in this POC)
+  const supportsAttachments = channel === "mail" || channel === "whatsapp";
+
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    setAttachments((prev) => [...prev, ...files].slice(0, 5));
+    // reset so same file can be re-selected
+    e.target.value = "";
+  }
+
+  function removeAttachment(index: number) {
+    setAttachments((prev) => prev.filter((_, i) => i !== index));
+  }
 
   // Show the subject field only when composing mail and no prior mail exists
   const hasPriorMail = messages.some((m) => m.channel === "mail");
@@ -57,7 +76,10 @@ export default function ReplyBox({
   const channelReady =
     (channel === "mail" && hasEmail) ||
     ((channel === "sms" || channel === "whatsapp") && hasPhone);
-  const canSend = body.trim().length > 0 && !sending && channelReady;
+  const canSend =
+    (body.trim().length > 0 || attachments.length > 0) &&
+    !sending &&
+    channelReady;
 
   function handleSend() {
     if (!canSend) return;
@@ -74,11 +96,13 @@ export default function ReplyBox({
       channel,
       content,
       subject: showSubject && subject.trim() ? subject.trim() : undefined,
+      attachments: attachments.length > 0 ? attachments : undefined,
     })
       .then((msg) => {
         onSent(msg);
         setBody("");
         setSubject("");
+        setAttachments([]);
         toast("success", "Message envoyé");
       })
       .catch((err: unknown) => {
@@ -106,7 +130,10 @@ export default function ReplyBox({
         {TABS.map(({ key, label, Icon }) => (
           <button
             key={key}
-            onClick={() => setChannel(key)}
+            onClick={() => {
+              setChannel(key);
+              if (key === "sms") setAttachments([]);
+            }}
             className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-t-lg border-b-2 transition-colors ${
               channel === key
                 ? "border-indigo-500 text-indigo-600 bg-indigo-50"
@@ -160,15 +187,64 @@ export default function ReplyBox({
           </div>
         )}
 
+        {/* Attachment previews */}
+        {attachments.length > 0 && (
+          <div className="flex flex-wrap gap-2 mt-2">
+            {attachments.map((file, idx) => (
+              <div key={idx} className="relative group">
+                {file.type.startsWith("image/") ? (
+                  <img
+                    src={URL.createObjectURL(file)}
+                    alt={file.name}
+                    className="h-14 w-14 object-cover rounded-lg border border-gray-200"
+                  />
+                ) : (
+                  <div
+                    className="h-14 w-14 flex flex-col items-center justify-center gap-0.5 rounded-lg border border-gray-200 bg-gray-50 px-1"
+                    title={file.name}
+                  >
+                    <FileText size={18} className="text-gray-400" />
+                    <span className="text-[9px] text-gray-500 truncate max-w-full">
+                      {file.name.split(".").pop()?.toUpperCase()}
+                    </span>
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onClick={() => removeAttachment(idx)}
+                  className="absolute -top-1.5 -right-1.5 bg-white border border-gray-200 rounded-full p-0.5 text-gray-500 hover:text-red-500 shadow-sm opacity-0 group-hover:opacity-100 transition-opacity"
+                >
+                  <X size={10} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* Actions bar */}
         <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-100">
-          <button
-            type="button"
-            className="p-1.5 text-gray-400 hover:text-gray-600 rounded-md hover:bg-gray-100 transition-colors"
-            title="Pièce jointe"
-          >
-            <Paperclip size={15} />
-          </button>
+          {supportsAttachments ? (
+            <>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/gif,image/webp,application/pdf"
+                multiple
+                className="hidden"
+                onChange={handleFileChange}
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="p-1.5 text-gray-400 hover:text-gray-600 rounded-md hover:bg-gray-100 transition-colors"
+                title="Ajouter une pièce jointe (image ou PDF)"
+              >
+                <Paperclip size={15} />
+              </button>
+            </>
+          ) : (
+            <span />
+          )}
 
           <div className="flex items-center gap-2">
             <span className="text-xs text-gray-400 hidden sm:block">

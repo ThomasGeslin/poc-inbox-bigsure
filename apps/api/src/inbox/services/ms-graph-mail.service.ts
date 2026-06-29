@@ -6,10 +6,17 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import axios from 'axios';
+import {
+  isAcceptedAttachmentType,
+  extFromFilename,
+} from '../utils/attachment.utils';
+import { StorageService } from './storage.service';
 
 export interface SendEmailOptions {
   /** Override the default sender mailbox */
   from?: string;
+  /** File attachments to include in the email */
+  attachments?: Express.Multer.File[];
 }
 
 interface CachedToken {
@@ -48,7 +55,7 @@ export class MsGraphMailService implements OnModuleInit, OnModuleDestroy {
   private readonly activeSubscriptions: GraphSubscriptionInfo[] = [];
   private renewalTimer: NodeJS.Timeout | null = null;
 
-  constructor() {
+  constructor(private readonly storage: StorageService) {
     const tenantId = process.env.ENTRA_TENANT_ID;
     const clientId = process.env.ENTRA_CLIENT_ID;
     const clientSecret = process.env.ENTRA_CLIENT_SECRET;
@@ -200,11 +207,21 @@ export class MsGraphMailService implements OnModuleInit, OnModuleDestroy {
     const from = options?.from ?? this.defaultFrom;
     const token = await this.getAccessToken();
 
-    const message = {
+    const graphAttachments = (options?.attachments ?? []).map((f) => ({
+      '@odata.type': '#microsoft.graph.fileAttachment',
+      name: f.originalname,
+      contentType: f.mimetype,
+      contentBytes: f.buffer.toString('base64'),
+    }));
+
+    const message: Record<string, unknown> = {
       subject,
       body: { contentType: 'HTML', content: html },
       toRecipients: [{ emailAddress: { address: to } }],
     };
+    if (graphAttachments.length > 0) {
+      message.attachments = graphAttachments;
+    }
 
     const url = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(from)}/sendMail`;
 
@@ -242,6 +259,7 @@ export class MsGraphMailService implements OnModuleInit, OnModuleDestroy {
     from: string,
     graphMessageId: string,
     html: string,
+    attachments?: Express.Multer.File[],
   ): Promise<string> {
     const token = await this.getAccessToken();
     const baseUrl = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(from)}/messages/${graphMessageId}`;
@@ -277,7 +295,28 @@ export class MsGraphMailService implements OnModuleInit, OnModuleDestroy {
         },
       );
 
-      // 3. Send the draft
+      // 3. Add attachments to the draft if provided
+      if (attachments && attachments.length > 0) {
+        for (const file of attachments) {
+          await axios.post(
+            `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(from)}/messages/${draftId}/attachments`,
+            {
+              '@odata.type': '#microsoft.graph.fileAttachment',
+              name: file.originalname,
+              contentType: file.mimetype,
+              contentBytes: file.buffer.toString('base64'),
+            },
+            {
+              headers: {
+                Authorization: `Bearer ${token}`,
+                'Content-Type': 'application/json',
+              },
+            },
+          );
+        }
+      }
+
+      // 4. Send the draft
       await axios.post(
         `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(from)}/messages/${draftId}/send`,
         {},
@@ -294,6 +333,59 @@ export class MsGraphMailService implements OnModuleInit, OnModuleDestroy {
       throw new InternalServerErrorException(
         `Failed to send reply via Graph API: ${msg}`,
       );
+    }
+  }
+
+  /**
+   * Fetch attachment list for a message and return public-facing download paths.
+   * Only real file attachments that are images or PDFs are fetched; inline
+   * attachments (e.g. signature logos embedded in the HTML body) are skipped.
+   */
+  async getMessageAttachmentUrls(
+    mailbox: string,
+    graphMessageId: string,
+  ): Promise<string[]> {
+    const token = await this.getAccessToken();
+    // No $select: `contentBytes` only exists on the derived type
+    // microsoft.graph.fileAttachment, not the base microsoft.graph.attachment
+    // the collection is typed as — selecting it makes Graph reject the request.
+    // The unselected GET returns full attachment objects (contentBytes + isInline).
+    const url = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(mailbox)}/messages/${graphMessageId}/attachments`;
+
+    try {
+      const res = await axios.get<{
+        value: Array<{
+          id: string;
+          name: string;
+          contentType: string;
+          contentBytes?: string;
+          size: number;
+          isInline?: boolean;
+        }>;
+      }>(url, { headers: { Authorization: `Bearer ${token}` } });
+
+      const urls: string[] = [];
+
+      for (const att of res.data.value) {
+        if (att.isInline) continue;
+        if (!isAcceptedAttachmentType(att.contentType)) continue;
+        if (!att.contentBytes) continue;
+
+        const url = await this.storage.upload(
+          Buffer.from(att.contentBytes, 'base64'),
+          att.contentType,
+          extFromFilename(att.name),
+        );
+        urls.push(url);
+      }
+
+      return urls;
+    } catch (err: unknown) {
+      const msg = this.extractGraphError(err);
+      this.logger.warn(
+        `Could not fetch attachments for ${graphMessageId}: ${msg}`,
+      );
+      return [];
     }
   }
   // ── Fetch message content ─────────────────────────────────────────────────

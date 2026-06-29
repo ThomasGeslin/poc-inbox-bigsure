@@ -29,4 +29,7 @@ export class TwilioInboundDto {
   @IsOptional()
   @IsString()
   ProfileName?: string;
+
+  // Dynamic media fields — Twilio sends MediaUrl0…N and MediaContentType0…N
+  [key: string]: string | undefined;
 }

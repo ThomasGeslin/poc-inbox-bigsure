@@ -7,7 +7,11 @@ import {
   Body,
   HttpCode,
   HttpStatus,
+  UseInterceptors,
+  UploadedFiles,
 } from '@nestjs/common';
+import { FilesInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import { CommandBus, QueryBus } from '@nestjs/cqrs';
 import { SendMessageCommand } from '../commands/send-message.command';
 import { UpdateConversationStatusCommand } from '../commands/update-conversation-status.command';
@@ -15,6 +19,7 @@ import { MarkAsReadCommand } from '../commands/mark-as-read.command';
 import { GetConversationsQuery } from '../queries/get-conversations.query';
 import { GetConversationMessagesQuery } from '../queries/get-conversation-messages.query';
 import { SendMessageDto } from '../dto/send-message.dto';
+import { isAcceptedAttachmentType } from '../utils/attachment.utils';
 import { ConversationStatus, Channel, Message } from '@prisma/client';
 
 const CHANNEL_INPUT_MAP: Record<string, Channel> = {
@@ -51,10 +56,27 @@ export class ConversationsController {
 
   @Post(':id/messages')
   @HttpCode(HttpStatus.CREATED)
-  async createMessage(@Param('id') id: string, @Body() dto: SendMessageDto) {
+  @UseInterceptors(
+    FilesInterceptor('attachments', 5, {
+      storage: memoryStorage(),
+      limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB per file
+      fileFilter: (
+        _req: unknown,
+        file: Express.Multer.File,
+        cb: (err: Error | null, accept: boolean) => void,
+      ) => {
+        cb(null, isAcceptedAttachmentType(file.mimetype));
+      },
+    }),
+  )
+  async createMessage(
+    @Param('id') id: string,
+    @Body() dto: SendMessageDto,
+    @UploadedFiles() files?: Express.Multer.File[],
+  ) {
     const channel = CHANNEL_INPUT_MAP[dto.channel];
     const message: Message = await this.commandBus.execute(
-      new SendMessageCommand(id, channel, dto.content, dto.subject),
+      new SendMessageCommand(id, channel, dto.content, dto.subject, files),
     );
     // Normalize to lowercase for frontend consistency (same as query handlers)
     return {

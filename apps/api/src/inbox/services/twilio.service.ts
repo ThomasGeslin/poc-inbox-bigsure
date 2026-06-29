@@ -30,7 +30,11 @@ export class TwilioService {
   }
 
   /** Send an SMS message via Twilio */
-  async sendSms(to: string, body: string): Promise<string> {
+  async sendSms(
+    to: string,
+    body: string,
+    mediaUrls?: string[],
+  ): Promise<string> {
     const normalizedTo = this.normalizeE164(to);
     if (!normalizedTo) {
       throw new BadRequestException(`Invalid phone number: ${to}`);
@@ -48,6 +52,7 @@ export class TwilioService {
         to: normalizedTo,
         from,
         body,
+        ...(mediaUrls && mediaUrls.length > 0 ? { mediaUrl: mediaUrls } : {}),
       });
       return result.sid;
     } catch (err: unknown) {
@@ -60,7 +65,11 @@ export class TwilioService {
   }
 
   /** Send a WhatsApp message via Twilio */
-  async sendWhatsApp(to: string, body: string): Promise<string> {
+  async sendWhatsApp(
+    to: string,
+    body: string,
+    mediaUrls?: string[],
+  ): Promise<string> {
     const fromRaw = process.env.TWILIO_WHATSAPP_NUMBER;
     if (!fromRaw) {
       throw new InternalServerErrorException(
@@ -78,6 +87,7 @@ export class TwilioService {
         to: toFormatted,
         from,
         body,
+        ...(mediaUrls && mediaUrls.length > 0 ? { mediaUrl: mediaUrls } : {}),
       });
 
       this.logger.log(

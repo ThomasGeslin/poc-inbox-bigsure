@@ -24,6 +24,7 @@ import { GetConversationMessagesHandler } from './queries/get-conversation-messa
 // Services
 import { TwilioService } from './services/twilio.service';
 import { MsGraphMailService } from './services/ms-graph-mail.service';
+import { StorageService } from './services/storage.service';
 
 const CommandHandlers = [
   SendMessageHandler,
@@ -51,6 +52,7 @@ const QueryHandlers = [GetConversationsHandler, GetConversationMessagesHandler];
     ...QueryHandlers,
     TwilioService,
     MsGraphMailService,
+    StorageService,
   ],
 })
 export class InboxModule {}

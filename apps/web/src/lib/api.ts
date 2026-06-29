@@ -42,6 +42,7 @@ export interface SendMessagePayload {
   channel: string;
   content: string;
   subject?: string;
+  attachments?: File[];
 }
 
 /** Send an outbound message on a conversation */
@@ -49,14 +50,34 @@ export async function sendMessage(
   conversationId: string,
   payload: SendMessagePayload,
 ): Promise<Message> {
-  const res = await fetch(
-    `${BASE_URL}/conversations/${conversationId}/messages`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    },
-  );
+  let res: globalThis.Response;
+
+  if (payload.attachments && payload.attachments.length > 0) {
+    const form = new FormData();
+    form.append("channel", payload.channel);
+    form.append("content", payload.content);
+    if (payload.subject) form.append("subject", payload.subject);
+    for (const file of payload.attachments) {
+      form.append("attachments", file);
+    }
+    res = await fetch(
+      `${BASE_URL}/conversations/${conversationId}/messages`,
+      { method: "POST", body: form },
+    );
+  } else {
+    res = await fetch(
+      `${BASE_URL}/conversations/${conversationId}/messages`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          channel: payload.channel,
+          content: payload.content,
+          subject: payload.subject,
+        }),
+      },
+    );
+  }
 
   if (!res.ok) {
     const body = await res.json().catch(() => null);

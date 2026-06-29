@@ -14,6 +14,7 @@ import {
 } from '@nestjs/common';
 import { CommandBus } from '@nestjs/cqrs';
 import type { Request, Response } from 'express';
+import axios from 'axios';
 import { parsePhoneNumber, isValidPhoneNumber } from 'libphonenumber-js';
 import { TwilioInboundDto } from '../dto/twilio-inbound.dto';
 import { TwilioVoiceStatusDto } from '../dto/twilio-voice-status.dto';
@@ -24,6 +25,11 @@ import { LogCallCommand, CallLogStatus } from '../commands/log-call.command';
 import { MsGraphMailService } from '../services/ms-graph-mail.service';
 import { MsGraphNotificationPayload } from '../dto/ms-graph-notification.dto';
 import { stripQuotedReply } from '../utils/mail-content.utils';
+import {
+  isAcceptedAttachmentType,
+  extFromContentType,
+} from '../utils/attachment.utils';
+import { StorageService } from '../services/storage.service';
 
 @Controller('webhooks')
 export class WebhooksController {
@@ -33,6 +39,7 @@ export class WebhooksController {
     private readonly commandBus: CommandBus,
     private readonly twilioService: TwilioService,
     private readonly msGraphMailService: MsGraphMailService,
+    private readonly storage: StorageService,
   ) {}
 
   /** Handle incoming SMS messages from Twilio */
@@ -89,6 +96,15 @@ export class WebhooksController {
       rawFrom: dto.From,
       rawTo: dto.To,
     };
+
+    const numMedia = parseInt(dto.NumMedia ?? '0', 10);
+    if (numMedia > 0) {
+      const mediaUrls = await this.downloadTwilioMedia(
+        req.body as Record<string, string>,
+        numMedia,
+      );
+      if (mediaUrls.length > 0) meta.mediaUrls = mediaUrls;
+    }
 
     await this.commandBus.execute(
       new ReceiveInboundMessageCommand(normalizedPhone, 'SMS', dto.Body, meta),
@@ -157,6 +173,15 @@ export class WebhooksController {
       rawFrom: dto.From,
       rawTo: dto.To,
     };
+
+    const numMediaInbound = parseInt(dto.NumMedia ?? '0', 10);
+    if (numMediaInbound > 0) {
+      const mediaUrls = await this.downloadTwilioMedia(
+        req.body as Record<string, string>,
+        numMediaInbound,
+      );
+      if (mediaUrls.length > 0) meta.mediaUrls = mediaUrls;
+    }
 
     await this.commandBus.execute(
       new ReceiveInboundMessageCommand(
@@ -279,6 +304,13 @@ export class WebhooksController {
         ? referencesRaw.split(/\s+/).filter(Boolean)
         : undefined;
 
+      // Fetch image/PDF attachments from Graph and upload them to storage
+      const attachmentUrls =
+        await this.msGraphMailService.getMessageAttachmentUrls(
+          mailbox,
+          graphMessageId,
+        );
+
       await this.commandBus.execute(
         new ReceiveMailCommand(
           resolvedFrom,
@@ -289,6 +321,7 @@ export class WebhooksController {
           references,
           resolvedSenderName,
           graphMessageId,
+          attachmentUrls.length > 0 ? attachmentUrls : undefined,
         ),
       );
 
@@ -463,5 +496,56 @@ export class WebhooksController {
 
   private emptyTwiml(): string {
     return '<?xml version="1.0" encoding="UTF-8"?><Response></Response>';
+  }
+
+  /**
+   * Download Twilio media files (MediaUrl0…N) and upload them to storage,
+   * returning their public-facing URLs.
+   *
+   * Twilio's MediaUrl responds with a 302 redirect to the real file hosted on
+   * S3. axios follows redirects automatically (and drops the Authorization
+   * header on the cross-host hop, as the S3 URL is pre-signed). A raw http.get
+   * would not follow the redirect and would save the redirect body, producing
+   * a corrupted file.
+   */
+  private async downloadTwilioMedia(
+    body: Record<string, string>,
+    numMedia: number,
+  ): Promise<string[]> {
+    if (numMedia === 0) return [];
+
+    const urls: string[] = [];
+
+    for (let i = 0; i < numMedia; i++) {
+      const mediaUrl = body[`MediaUrl${i}`];
+      const contentType =
+        body[`MediaContentType${i}`] ?? 'application/octet-stream';
+
+      if (!mediaUrl) continue;
+      if (!isAcceptedAttachmentType(contentType)) continue;
+
+      try {
+        const res = await axios.get<ArrayBuffer>(mediaUrl, {
+          responseType: 'arraybuffer',
+          auth: {
+            username: process.env.TWILIO_ACCOUNT_SID ?? '',
+            password: process.env.TWILIO_AUTH_TOKEN ?? '',
+          },
+        });
+        const url = await this.storage.upload(
+          Buffer.from(res.data),
+          contentType,
+          extFromContentType(contentType),
+        );
+
+        urls.push(url);
+      } catch (err) {
+        this.logger.warn(
+          `Failed to download Twilio media ${mediaUrl}: ${String(err)}`,
+        );
+      }
+    }
+
+    return urls;
   }
 }

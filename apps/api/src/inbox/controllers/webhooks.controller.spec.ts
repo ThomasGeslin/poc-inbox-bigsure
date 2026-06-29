@@ -1,12 +1,13 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import {
-  BadRequestException,
-  UnauthorizedException,
-} from '@nestjs/common';
+import { BadRequestException, UnauthorizedException } from '@nestjs/common';
 import { CommandBus } from '@nestjs/cqrs';
+import axios from 'axios';
 import { WebhooksController } from './webhooks.controller';
+
+jest.mock('axios');
 import { TwilioService } from '../services/twilio.service';
 import { MsGraphMailService } from '../services/ms-graph-mail.service';
+import { StorageService } from '../services/storage.service';
 import { ReceiveInboundMessageCommand } from '../commands/receive-inbound-message.command';
 import { ReceiveMailCommand } from '../commands/receive-mail.command';
 import { LogCallCommand } from '../commands/log-call.command';
@@ -43,6 +44,7 @@ describe('WebhooksController', () => {
   let commandBus: jest.Mocked<CommandBus>;
   let twilioService: jest.Mocked<TwilioService>;
   let msGraphMailService: jest.Mocked<MsGraphMailService>;
+  let storageService: jest.Mocked<StorageService>;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -60,18 +62,26 @@ describe('WebhooksController', () => {
           provide: MsGraphMailService,
           useValue: {
             getMessage: jest.fn(),
+            getMessageAttachmentUrls: jest.fn().mockResolvedValue([]),
             registerSubscriptions: jest.fn(),
+          },
+        },
+        {
+          provide: StorageService,
+          useValue: {
+            upload: jest
+              .fn()
+              .mockResolvedValue('https://store.test/object.jpg'),
           },
         },
       ],
     }).compile();
 
     controller = module.get(WebhooksController);
-    commandBus = module.get(CommandBus) as jest.Mocked<CommandBus>;
-    twilioService = module.get(TwilioService) as jest.Mocked<TwilioService>;
-    msGraphMailService = module.get(
-      MsGraphMailService,
-    ) as jest.Mocked<MsGraphMailService>;
+    commandBus = module.get(CommandBus);
+    twilioService = module.get(TwilioService);
+    msGraphMailService = module.get(MsGraphMailService);
+    storageService = module.get(StorageService);
 
     process.env.TWILIO_AUTH_TOKEN = 'test-auth-token';
     process.env.TWILIO_FORWARD_NUMBER = '+33700000000';
@@ -97,13 +107,23 @@ describe('WebhooksController', () => {
 
     it('validates Twilio signature, normalizes phone and dispatches ReceiveInboundMessageCommand', async () => {
       (twilioService.validateSignature as jest.Mock).mockReturnValue(true);
-      (twilioService.normalizeE164 as jest.Mock).mockReturnValue(NORMALIZED_PHONE);
+      (twilioService.normalizeE164 as jest.Mock).mockReturnValue(
+        NORMALIZED_PHONE,
+      );
       (commandBus.execute as jest.Mock).mockResolvedValue(undefined);
 
-      const req = makeReq({ body: smsDto, originalUrl: '/api/webhooks/twilio/inbound' });
+      const req = makeReq({
+        body: smsDto,
+        originalUrl: '/api/webhooks/twilio/inbound',
+      });
       const res = makeRes();
 
-      await controller.handleTwilioInbound(smsDto as never, 'valid-sig', req, res as never);
+      await controller.handleTwilioInbound(
+        smsDto,
+        'valid-sig',
+        req,
+        res as never,
+      );
 
       expect(twilioService.validateSignature).toHaveBeenCalledWith(
         'test-auth-token',
@@ -125,13 +145,20 @@ describe('WebhooksController', () => {
 
     it('responds with empty TwiML to prevent Twilio retries', async () => {
       (twilioService.validateSignature as jest.Mock).mockReturnValue(true);
-      (twilioService.normalizeE164 as jest.Mock).mockReturnValue(NORMALIZED_PHONE);
+      (twilioService.normalizeE164 as jest.Mock).mockReturnValue(
+        NORMALIZED_PHONE,
+      );
       (commandBus.execute as jest.Mock).mockResolvedValue(undefined);
 
       const req = makeReq({ body: smsDto });
       const res = makeRes();
 
-      await controller.handleTwilioInbound(smsDto as never, 'valid-sig', req, res as never);
+      await controller.handleTwilioInbound(
+        smsDto,
+        'valid-sig',
+        req,
+        res as never,
+      );
 
       expect(res.set).toHaveBeenCalledWith('Content-Type', 'text/xml');
       expect(res.send).toHaveBeenCalledWith(
@@ -146,10 +173,88 @@ describe('WebhooksController', () => {
       const res = makeRes();
 
       await expect(
-        controller.handleTwilioInbound(smsDto as never, 'bad-sig', req, res as never),
+        controller.handleTwilioInbound(
+          smsDto as never,
+          'bad-sig',
+          req,
+          res as never,
+        ),
       ).rejects.toThrow(BadRequestException);
 
       expect(commandBus.execute).not.toHaveBeenCalled();
+    });
+
+    it('downloads inbound media and attaches their URLs to the command meta', async () => {
+      (twilioService.validateSignature as jest.Mock).mockReturnValue(true);
+      (twilioService.normalizeE164 as jest.Mock).mockReturnValue(
+        NORMALIZED_PHONE,
+      );
+      (commandBus.execute as jest.Mock).mockResolvedValue(undefined);
+      const downloadSpy = jest
+        .spyOn(
+          controller as unknown as {
+            downloadTwilioMedia: (
+              body: Record<string, string>,
+              n: number,
+            ) => Promise<string[]>;
+          },
+          'downloadTwilioMedia',
+        )
+        .mockResolvedValue(['https://app.example.com/uploads/x.jpg']);
+
+      const mediaDto = {
+        ...smsDto,
+        NumMedia: '1',
+        MediaUrl0: 'https://api.twilio.com/media/x',
+        MediaContentType0: 'image/jpeg',
+      };
+      const req = makeReq({ body: mediaDto });
+      const res = makeRes();
+
+      await controller.handleTwilioInbound(
+        mediaDto,
+        'valid-sig',
+        req,
+        res as never,
+      );
+
+      expect(downloadSpy).toHaveBeenCalledWith(mediaDto, 1);
+      expect(commandBus.execute).toHaveBeenCalledWith(
+        expect.objectContaining({
+          meta: expect.objectContaining({
+            mediaUrls: ['https://app.example.com/uploads/x.jpg'],
+          }),
+        }),
+      );
+    });
+
+    it('does not download media when NumMedia is 0', async () => {
+      (twilioService.validateSignature as jest.Mock).mockReturnValue(true);
+      (twilioService.normalizeE164 as jest.Mock).mockReturnValue(
+        NORMALIZED_PHONE,
+      );
+      (commandBus.execute as jest.Mock).mockResolvedValue(undefined);
+      const downloadSpy = jest.spyOn(
+        controller as unknown as {
+          downloadTwilioMedia: (
+            body: Record<string, string>,
+            n: number,
+          ) => Promise<string[]>;
+        },
+        'downloadTwilioMedia',
+      );
+
+      const req = makeReq({ body: { ...smsDto, NumMedia: '0' } });
+      const res = makeRes();
+
+      await controller.handleTwilioInbound(
+        { ...smsDto, NumMedia: '0' },
+        'valid-sig',
+        req,
+        res as never,
+      );
+
+      expect(downloadSpy).not.toHaveBeenCalled();
     });
 
     it('throws BadRequestException when phone cannot be normalized', async () => {
@@ -161,7 +266,12 @@ describe('WebhooksController', () => {
       const res = makeRes();
 
       await expect(
-        controller.handleTwilioInbound(badDto as never, 'sig', req, res as never),
+        controller.handleTwilioInbound(
+          badDto as never,
+          'sig',
+          req,
+          res as never,
+        ),
       ).rejects.toThrow(BadRequestException);
     });
   });
@@ -178,16 +288,21 @@ describe('WebhooksController', () => {
 
     it('detects WhatsApp prefix and dispatches command with channel WHATSAPP', async () => {
       (twilioService.validateSignature as jest.Mock).mockReturnValue(true);
-      (twilioService.normalizeE164 as jest.Mock).mockReturnValue(NORMALIZED_PHONE);
+      (twilioService.normalizeE164 as jest.Mock).mockReturnValue(
+        NORMALIZED_PHONE,
+      );
       (commandBus.execute as jest.Mock).mockResolvedValue(undefined);
 
       const req = makeReq({ body: waDto });
       const res = makeRes();
 
-      await controller.handleTwilioInbound(waDto as never, 'sig', req, res as never);
+      await controller.handleTwilioInbound(waDto, 'sig', req, res as never);
 
       expect(commandBus.execute).toHaveBeenCalledWith(
-        expect.objectContaining({ channel: 'WHATSAPP', phone: NORMALIZED_PHONE }),
+        expect.objectContaining({
+          channel: 'WHATSAPP',
+          phone: NORMALIZED_PHONE,
+        }),
       );
     });
 
@@ -198,10 +313,12 @@ describe('WebhooksController', () => {
       const req = makeReq({ body: waDto });
       const res = makeRes();
 
-      await controller.handleTwilioInbound(waDto as never, 'sig', req, res as never);
+      await controller.handleTwilioInbound(waDto, 'sig', req, res as never);
 
       // The command phone must not contain the whatsapp: prefix
-      const dispatched: ReceiveInboundMessageCommand = (commandBus.execute as jest.Mock).mock.calls[0][0];
+      const dispatched: ReceiveInboundMessageCommand = (
+        commandBus.execute as jest.Mock
+      ).mock.calls[0][0];
       expect(dispatched.phone).not.toContain('whatsapp:');
       expect(dispatched.phone).toBe(NORMALIZED_PHONE);
     });
@@ -251,7 +368,11 @@ describe('WebhooksController', () => {
     it('responds 202 and ignores an empty notification payload', async () => {
       const res = makeRes();
 
-      await controller.handleMsGraphMail(undefined, { value: [] }, res as never);
+      await controller.handleMsGraphMail(
+        undefined,
+        { value: [] },
+        res as never,
+      );
 
       expect(res.status).toHaveBeenCalledWith(202);
       expect(msGraphMailService.getMessage).not.toHaveBeenCalled();
@@ -288,6 +409,66 @@ describe('WebhooksController', () => {
           graphMessageId: 'graph-1',
         }),
       );
+    });
+
+    it('downloads attachments and forwards their URLs on the ReceiveMailCommand', async () => {
+      (msGraphMailService.getMessage as jest.Mock).mockResolvedValue(
+        makeGraphMessage(),
+      );
+      (
+        msGraphMailService.getMessageAttachmentUrls as jest.Mock
+      ).mockResolvedValue([
+        'https://app.example.com/uploads/a.png',
+        'https://app.example.com/uploads/b.pdf',
+      ]);
+      (commandBus.execute as jest.Mock).mockResolvedValue(undefined);
+
+      const res = makeRes();
+      await controller.handleMsGraphMail(
+        undefined,
+        { value: [makeNotification()] },
+        res as never,
+      );
+      await flushAsync();
+
+      expect(msGraphMailService.getMessageAttachmentUrls).toHaveBeenCalledWith(
+        'plomberie-bigsur@batibig.com',
+        'graph-1',
+      );
+      const dispatched: ReceiveMailCommand = (
+        commandBus.execute as jest.Mock
+      ).mock.calls.find(
+        (c: unknown[]) => c[0] instanceof ReceiveMailCommand,
+      )?.[0];
+      expect(dispatched.attachmentUrls).toEqual([
+        'https://app.example.com/uploads/a.png',
+        'https://app.example.com/uploads/b.pdf',
+      ]);
+    });
+
+    it('leaves attachmentUrls undefined when the message has no attachments', async () => {
+      (msGraphMailService.getMessage as jest.Mock).mockResolvedValue(
+        makeGraphMessage(),
+      );
+      (
+        msGraphMailService.getMessageAttachmentUrls as jest.Mock
+      ).mockResolvedValue([]);
+      (commandBus.execute as jest.Mock).mockResolvedValue(undefined);
+
+      const res = makeRes();
+      await controller.handleMsGraphMail(
+        undefined,
+        { value: [makeNotification()] },
+        res as never,
+      );
+      await flushAsync();
+
+      const dispatched: ReceiveMailCommand = (
+        commandBus.execute as jest.Mock
+      ).mock.calls.find(
+        (c: unknown[]) => c[0] instanceof ReceiveMailCommand,
+      )?.[0];
+      expect(dispatched.attachmentUrls).toBeUndefined();
     });
 
     it('ignores notifications whose clientState does not match the secret', async () => {
@@ -332,7 +513,7 @@ describe('WebhooksController', () => {
       controller.handleTwilioVoice(res as never);
 
       expect(res.set).toHaveBeenCalledWith('Content-Type', 'text/xml');
-      const sentTwiml: string = (res.send as jest.Mock).mock.calls[0][0];
+      const sentTwiml: string = res.send.mock.calls[0][0];
       expect(sentTwiml).toContain('<Dial>');
       expect(sentTwiml).toContain('+33700000000');
     });
@@ -343,7 +524,7 @@ describe('WebhooksController', () => {
 
       controller.handleTwilioVoice(res as never);
 
-      const sentTwiml: string = (res.send as jest.Mock).mock.calls[0][0];
+      const sentTwiml: string = res.send.mock.calls[0][0];
       expect(sentTwiml).not.toContain('<Dial>');
       expect(sentTwiml).toContain('<Response>');
     });
@@ -363,20 +544,27 @@ describe('WebhooksController', () => {
 
     it('validates signature, normalizes phone and dispatches LogCallCommand for a completed inbound call', async () => {
       (twilioService.validateSignature as jest.Mock).mockReturnValue(true);
-      (twilioService.normalizeE164 as jest.Mock).mockReturnValue(NORMALIZED_PHONE);
+      (twilioService.normalizeE164 as jest.Mock).mockReturnValue(
+        NORMALIZED_PHONE,
+      );
       (commandBus.execute as jest.Mock).mockResolvedValue(undefined);
 
-      const req = makeReq({ body: completedInboundDto, originalUrl: '/api/webhooks/twilio/voice/status' });
+      const req = makeReq({
+        body: completedInboundDto,
+        originalUrl: '/api/webhooks/twilio/voice/status',
+      });
       const res = makeRes();
 
       await controller.handleTwilioVoiceStatus(
-        completedInboundDto as never,
+        completedInboundDto,
         'valid-sig',
         req,
         res as never,
       );
 
-      expect(commandBus.execute).toHaveBeenCalledWith(expect.any(LogCallCommand));
+      expect(commandBus.execute).toHaveBeenCalledWith(
+        expect.any(LogCallCommand),
+      );
       expect(commandBus.execute).toHaveBeenCalledWith(
         expect.objectContaining({
           phone: NORMALIZED_PHONE,
@@ -389,14 +577,20 @@ describe('WebhooksController', () => {
 
     it('maps "no-answer" CallStatus to status "no-answer"', async () => {
       (twilioService.validateSignature as jest.Mock).mockReturnValue(true);
-      (twilioService.normalizeE164 as jest.Mock).mockReturnValue(NORMALIZED_PHONE);
+      (twilioService.normalizeE164 as jest.Mock).mockReturnValue(
+        NORMALIZED_PHONE,
+      );
       (commandBus.execute as jest.Mock).mockResolvedValue(undefined);
 
-      const dto = { ...completedInboundDto, CallStatus: 'no-answer', CallDuration: '0' };
+      const dto = {
+        ...completedInboundDto,
+        CallStatus: 'no-answer',
+        CallDuration: '0',
+      };
       const req = makeReq({ body: dto });
       const res = makeRes();
 
-      await controller.handleTwilioVoiceStatus(dto as never, 'sig', req, res as never);
+      await controller.handleTwilioVoiceStatus(dto, 'sig', req, res as never);
 
       expect(commandBus.execute).toHaveBeenCalledWith(
         expect.objectContaining({ status: 'no-answer', duration: 0 }),
@@ -405,7 +599,9 @@ describe('WebhooksController', () => {
 
     it('maps outbound-api Direction to OUTBOUND and uses "To" as the contact phone', async () => {
       (twilioService.validateSignature as jest.Mock).mockReturnValue(true);
-      (twilioService.normalizeE164 as jest.Mock).mockReturnValue(NORMALIZED_PHONE);
+      (twilioService.normalizeE164 as jest.Mock).mockReturnValue(
+        NORMALIZED_PHONE,
+      );
       (commandBus.execute as jest.Mock).mockResolvedValue(undefined);
 
       const dto = {
@@ -419,10 +615,13 @@ describe('WebhooksController', () => {
       const req = makeReq({ body: dto });
       const res = makeRes();
 
-      await controller.handleTwilioVoiceStatus(dto as never, 'sig', req, res as never);
+      await controller.handleTwilioVoiceStatus(dto, 'sig', req, res as never);
 
       expect(commandBus.execute).toHaveBeenCalledWith(
-        expect.objectContaining({ direction: 'OUTBOUND', phone: NORMALIZED_PHONE }),
+        expect.objectContaining({
+          direction: 'OUTBOUND',
+          phone: NORMALIZED_PHONE,
+        }),
       );
     });
 
@@ -446,18 +645,122 @@ describe('WebhooksController', () => {
 
     it('maps "completed" with duration 0 as "no-answer" (zero-duration completed call)', async () => {
       (twilioService.validateSignature as jest.Mock).mockReturnValue(true);
-      (twilioService.normalizeE164 as jest.Mock).mockReturnValue(NORMALIZED_PHONE);
+      (twilioService.normalizeE164 as jest.Mock).mockReturnValue(
+        NORMALIZED_PHONE,
+      );
       (commandBus.execute as jest.Mock).mockResolvedValue(undefined);
 
-      const dto = { ...completedInboundDto, CallStatus: 'completed', CallDuration: '0' };
+      const dto = {
+        ...completedInboundDto,
+        CallStatus: 'completed',
+        CallDuration: '0',
+      };
       const req = makeReq({ body: dto });
       const res = makeRes();
 
-      await controller.handleTwilioVoiceStatus(dto as never, 'sig', req, res as never);
+      await controller.handleTwilioVoiceStatus(dto, 'sig', req, res as never);
 
       expect(commandBus.execute).toHaveBeenCalledWith(
         expect.objectContaining({ status: 'no-answer' }),
       );
+    });
+  });
+
+  // ── Twilio media download (inbound MMS / WhatsApp images) ────────────────
+  describe('downloadTwilioMedia', () => {
+    // Access the private method under test.
+    const download = (
+      body: Record<string, string>,
+      numMedia: number,
+    ): Promise<string[]> =>
+      (
+        controller as unknown as {
+          downloadTwilioMedia: (
+            b: Record<string, string>,
+            n: number,
+          ) => Promise<string[]>;
+        }
+      ).downloadTwilioMedia(body, numMedia);
+
+    beforeEach(() => {
+      (axios.get as jest.Mock).mockReset();
+      storageService.upload.mockClear();
+      process.env.TWILIO_ACCOUNT_SID = 'AC-test';
+    });
+
+    it('fetches media as binary via axios (which follows the 302 redirect) and uploads the real bytes to storage', async () => {
+      const imageBytes = Buffer.from('genuine-image-bytes');
+      (axios.get as jest.Mock).mockResolvedValue({ data: imageBytes });
+      storageService.upload.mockResolvedValue('https://store.test/x.jpeg');
+
+      const urls = await download(
+        {
+          MediaUrl0: 'https://api.twilio.com/2010/.../Media/ME123',
+          MediaContentType0: 'image/jpeg',
+        },
+        1,
+      );
+
+      // arraybuffer responseType is what prevents corruption / partial reads
+      expect(axios.get).toHaveBeenCalledWith(
+        'https://api.twilio.com/2010/.../Media/ME123',
+        expect.objectContaining({
+          responseType: 'arraybuffer',
+          auth: expect.objectContaining({ username: 'AC-test' }),
+        }),
+      );
+      // The bytes uploaded are the response body, not a redirect page.
+      expect(storageService.upload).toHaveBeenCalledWith(
+        imageBytes,
+        'image/jpeg',
+        'jpeg',
+      );
+      expect(urls).toEqual(['https://store.test/x.jpeg']);
+    });
+
+    it('downloads multiple media items and skips non-image/PDF types', async () => {
+      (axios.get as jest.Mock).mockResolvedValue({ data: Buffer.from('x') });
+      storageService.upload
+        .mockResolvedValueOnce('https://store.test/a.png')
+        .mockResolvedValueOnce('https://store.test/b.pdf');
+
+      const urls = await download(
+        {
+          MediaUrl0: 'https://api.twilio.com/m/0',
+          MediaContentType0: 'image/png',
+          MediaUrl1: 'https://api.twilio.com/m/1',
+          MediaContentType1: 'audio/ogg', // unsupported → skipped
+          MediaUrl2: 'https://api.twilio.com/m/2',
+          MediaContentType2: 'application/pdf',
+        },
+        3,
+      );
+
+      expect(urls).toHaveLength(2);
+      expect(axios.get).toHaveBeenCalledTimes(2);
+      expect(storageService.upload).toHaveBeenCalledTimes(2);
+      expect(urls).toEqual([
+        'https://store.test/a.png',
+        'https://store.test/b.pdf',
+      ]);
+    });
+
+    it('skips a media item whose download fails without aborting the others', async () => {
+      (axios.get as jest.Mock)
+        .mockRejectedValueOnce(new Error('network error'))
+        .mockResolvedValueOnce({ data: Buffer.from('ok') });
+
+      const urls = await download(
+        {
+          MediaUrl0: 'https://api.twilio.com/m/0',
+          MediaContentType0: 'image/jpeg',
+          MediaUrl1: 'https://api.twilio.com/m/1',
+          MediaContentType1: 'image/jpeg',
+        },
+        2,
+      );
+
+      expect(urls).toHaveLength(1);
     });
   });
 });

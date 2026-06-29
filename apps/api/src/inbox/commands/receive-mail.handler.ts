@@ -23,6 +23,7 @@ export class ReceiveMailHandler implements ICommandHandler<ReceiveMailCommand> {
       references,
       senderName,
       graphMessageId,
+      attachmentUrls,
     } = command;
 
     // ── Fast idempotency check before acquiring a transaction ─────────────
@@ -102,6 +103,7 @@ export class ReceiveMailHandler implements ICommandHandler<ReceiveMailCommand> {
         if (graphMessageId) meta.graphId = graphMessageId;
         if (inReplyTo) meta.inReplyTo = inReplyTo;
         if (references?.length) meta.references = references;
+        if (attachmentUrls?.length) meta.mediaUrls = attachmentUrls;
 
         const message = await tx.message.create({
           data: {

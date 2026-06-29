@@ -8,6 +8,8 @@ import { PrismaService } from '../../../prisma/prisma.service';
 import { TwilioService } from '../services/twilio.service';
 import { MsGraphMailService } from '../services/ms-graph-mail.service';
 import { SendMessageCommand } from './send-message.command';
+import { extFromFilename } from '../utils/attachment.utils';
+import { StorageService } from '../services/storage.service';
 import { Message } from '@prisma/client';
 
 @CommandHandler(SendMessageCommand)
@@ -18,10 +20,11 @@ export class SendMessageHandler implements ICommandHandler<SendMessageCommand> {
     private readonly prisma: PrismaService,
     private readonly twilioService: TwilioService,
     private readonly msGraphMailService: MsGraphMailService,
+    private readonly storage: StorageService,
   ) {}
 
   async execute(command: SendMessageCommand): Promise<Message> {
-    const { conversationId, channel, content, subject } = command;
+    const { conversationId, channel, content, subject, attachments } = command;
 
     const conversation = await this.prisma.conversation.findUnique({
       where: { id: conversationId },
@@ -33,6 +36,8 @@ export class SendMessageHandler implements ICommandHandler<SendMessageCommand> {
     }
 
     let outboundMeta: Record<string, unknown> | undefined;
+    // Subject to backfill onto the conversation when it was previously blank.
+    let subjectToPersist: string | undefined;
 
     // ── MAIL ──────────────────────────────────────────────────────────────
     if (channel === 'MAIL') {
@@ -74,6 +79,7 @@ export class SendMessageHandler implements ICommandHandler<SendMessageCommand> {
             this.msGraphMailService.defaultFrom,
             inReplyToGraphId,
             htmlContent,
+            attachments,
           );
           outboundGraphId = inReplyToGraphId;
         } else {
@@ -81,6 +87,7 @@ export class SendMessageHandler implements ICommandHandler<SendMessageCommand> {
             email,
             emailSubject,
             htmlContent,
+            { attachments },
           );
         }
       } catch (err: unknown) {
@@ -95,12 +102,23 @@ export class SendMessageHandler implements ICommandHandler<SendMessageCommand> {
         ...(outboundGraphId ? { graphId: outboundGraphId } : {}),
       };
 
-      // Update conversation subject if it was blank
+      // Backfill the conversation subject if it was previously blank.
       if (!conversation.subject && emailSubject) {
-        await this.prisma.conversation.update({
-          where: { id: conversationId },
-          data: { subject: emailSubject },
-        });
+        subjectToPersist = emailSubject;
+      }
+    }
+
+    // ── Upload attachments to storage, collect public URLs (all channels) ───
+    let mediaUrls: string[] | undefined;
+    if (attachments?.length) {
+      mediaUrls = [];
+      for (const file of attachments) {
+        const url = await this.storage.upload(
+          file.buffer,
+          file.mimetype,
+          extFromFilename(file.originalname),
+        );
+        mediaUrls.push(url);
       }
     }
 
@@ -115,9 +133,9 @@ export class SendMessageHandler implements ICommandHandler<SendMessageCommand> {
 
       try {
         if (channel === 'SMS') {
-          await this.twilioService.sendSms(phone, content);
+          await this.twilioService.sendSms(phone, content, mediaUrls);
         } else {
-          await this.twilioService.sendWhatsApp(phone, content);
+          await this.twilioService.sendWhatsApp(phone, content, mediaUrls);
         }
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -126,8 +144,14 @@ export class SendMessageHandler implements ICommandHandler<SendMessageCommand> {
       }
     }
 
-    const meta: Record<string, unknown> | undefined =
+    const messageMeta: Record<string, unknown> | undefined =
       outboundMeta ?? (subject ? { subject } : undefined);
+
+    // Include media URLs in meta for display in the frontend
+    const finalMeta: Record<string, unknown> = {
+      ...(messageMeta ?? {}),
+      ...(mediaUrls?.length ? { mediaUrls } : {}),
+    };
 
     const [message] = await this.prisma.$transaction([
       this.prisma.message.create({
@@ -137,12 +161,19 @@ export class SendMessageHandler implements ICommandHandler<SendMessageCommand> {
           direction: 'OUTBOUND',
           content,
           meta:
-            Object.keys(meta ?? {}).length > 0 ? (meta as object) : undefined,
+            Object.keys(finalMeta).length > 0
+              ? (finalMeta as object)
+              : undefined,
         },
       }),
       this.prisma.conversation.update({
         where: { id: conversationId },
-        data: { lastMessageAt: new Date(), unreadCount: 0, channel },
+        data: {
+          lastMessageAt: new Date(),
+          unreadCount: 0,
+          channel,
+          ...(subjectToPersist ? { subject: subjectToPersist } : {}),
+        },
       }),
     ]);
 

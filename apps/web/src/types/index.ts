@@ -61,6 +61,8 @@ export interface MessageMeta {
   numMedia?: string;
   rawFrom?: string;
   rawTo?: string;
+  // ── Attachments (all channels) ────────────────────────────────────────
+  mediaUrls?: string[];
 }
 
 export interface Message {

@@ -7,9 +7,13 @@ import {
   PhoneOutgoing,
   PhoneOff,
   Play,
+  FileText,
 } from "lucide-react";
 import type { Message } from "../types";
 import { formatTime } from "../utils/helpers";
+
+const isImageUrl = (url: string) =>
+  /\.(png|jpe?g|gif|webp|bmp|svg)(\?|$)/i.test(url);
 
 interface MessageBubbleProps {
   message: Message;
@@ -117,6 +121,44 @@ export default function MessageBubble({ message }: MessageBubbleProps) {
           <p className="text-sm whitespace-pre-wrap leading-relaxed">
             {message.content}
           </p>
+        )}
+
+        {/* Attachments (images + PDF/documents) */}
+        {message.meta?.mediaUrls && message.meta.mediaUrls.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mt-2">
+            {message.meta.mediaUrls.map((url, i) =>
+              isImageUrl(url) ? (
+                <a key={i} href={url} target="_blank" rel="noopener noreferrer">
+                  <img
+                    src={url}
+                    alt={`pièce jointe ${i + 1}`}
+                    className="max-h-48 max-w-[200px] rounded-lg object-cover border border-white/20 cursor-pointer hover:opacity-90 transition-opacity"
+                    onError={(e) => {
+                      (e.currentTarget as HTMLImageElement).style.display =
+                        "none";
+                    }}
+                  />
+                </a>
+              ) : (
+                <a
+                  key={i}
+                  href={url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs transition-opacity hover:opacity-90 ${
+                    isOut
+                      ? "border-white/20 bg-white/10 text-white"
+                      : "border-gray-200 bg-gray-50 text-gray-700"
+                  }`}
+                >
+                  <FileText size={14} />
+                  <span className="truncate max-w-[160px]">
+                    {decodeURIComponent(url.split("/").pop() ?? "pièce jointe")}
+                  </span>
+                </a>
+              ),
+            )}
+          </div>
         )}
 
         {/* Footer: channel icon + timestamp */}
