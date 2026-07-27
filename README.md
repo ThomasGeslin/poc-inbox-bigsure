@@ -35,8 +35,8 @@ This project uses **npm workspaces** to manage both apps from the root.
 
 ## Prerequisites
 
-- **Node.js** >= 18
-- **npm** >= 9 (workspaces support)
+- **Node.js 24** — pinned in [.nvmrc](.nvmrc) and in the root `engines` field. Prisma 7 refuses to install below 20.19, and one of its transitive dependencies requires 22+. The pin is also what tells Railway's builder which Node version to use; without it, it defaults to Node 18 and the install fails.
+- **npm** >= 10 (workspaces support)
 - A [Supabase](https://supabase.com) free project — provides both the **PostgreSQL** database and the **Storage** bucket used for attachments
 - **[ngrok](https://ngrok.com)** (or equivalent) to expose your local API for webhooks during development
 - A [Twilio](https://twilio.com) account (SMS, WhatsApp, Voice)
@@ -262,6 +262,7 @@ Notes on the build:
 
 - `npm run build` in `apps/api` runs `prisma generate` first, since the Prisma 7 client is not generated at install time.
 - The compiled entrypoint is `dist/src/main.js` — not `dist/main.js` — because the source tree spans both `src/` and `prisma/`, which lifts TypeScript's inferred root directory.
+- The Node version reaching the builder comes from the root `engines.node` field and [.nvmrc](.nvmrc). Removing either sends Nixpacks back to its Node 18 default, and `npm ci` then dies on Prisma's version check. If the builder ever fails to resolve the pinned version, the override is a `NIXPACKS_NODE_VERSION` variable on the service.
 - **Do not set `NODE_ENV=production` on Railway.** The build needs `@nestjs/cli`, a devDependency; with that variable set, the install step skips devDependencies and `nest build` fails with "nest: not found". Railway already runs the app in production mode without it.
 
 ---
