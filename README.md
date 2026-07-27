@@ -261,7 +261,9 @@ Migrations are not replayed by the deploy: the target Supabase database is alrea
 Both platforms watch the same repository, so a push touching only one app would redeploy both. They handle it differently:
 
 - **Vercel** skips unaffected projects by itself, but only if every workspace package carries a unique `name`. This is why `apps/web` is named `web` and not `poc-inbox` like the repository root — a duplicate name silently disables the feature.
-- **Railway** has no equivalent, so set **Watch Paths** to `apps/api/**` on the service. Without it, a frontend-only commit restarts the API, which re-registers a Graph subscription for nothing.
+- **Railway** has no equivalent, so [railway.json](railway.json) declares `watchPatterns`. It covers `apps/api/**` plus the root files that affect the API build — the lockfile, the root `package.json` holding the Node pin, `.nvmrc` and the config itself. Without it, a frontend-only commit restarts the API and re-registers a Graph subscription for nothing.
+
+On Railway, leave **Root Directory** at the repository root. This is a *shared* monorepo — one lockfile, npm workspaces — so the service is targeted by the `--workspace=apps/api` commands in `railway.json`, not by the directory setting. Pointing it at `apps/api` would hide the root lockfile and break the install. Note that Vercel works the opposite way: there, the Root Directory *is* the mechanism.
 
 Notes on the build:
 
