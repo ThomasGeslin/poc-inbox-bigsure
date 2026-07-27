@@ -242,14 +242,14 @@ The frontend prompts for the password once ([PasswordGate.tsx](apps/web/src/comp
 
 ## Deployment
 
-The API runs on **Railway** (a persistent process — it must not sleep, since the Graph subscription is registered at startup and renewed every 2 days) and the frontend on **Vercel** (static build). Config lives in [railway.json](railway.json) and [vercel.json](vercel.json).
+The API runs on **Railway** (a persistent process — it must not sleep, since the Graph subscription is registered at startup and renewed every 2 days) and the frontend on **Vercel** (static build). Railway is configured by [railway.json](railway.json); Vercel needs no config file, its Vite preset covers the build.
 
 Because `APP_PUBLIC_URL` must contain the Railway domain, which only exists after the first deploy, the order matters:
 
 1. Push to `main`.
 2. **Railway** → new project from the GitHub repo. Add every variable from `apps/api/.env` except `PORT` (Railway injects it), plus `APP_ACCESS_PASSWORD`. Deploy. The Graph subscription fails at this stage — expected.
 3. Generate the Railway domain, then set `APP_PUBLIC_URL` and `TWILIO_WEBHOOK_BASE_URL` to `https://<project>.up.railway.app` and redeploy. The subscription now registers.
-4. **Vercel** → import the same repo. Leave **Root Directory** at the repository root: [vercel.json](vercel.json) drives the build through the workspace. Set `VITE_API_URL` to `https://<project>.up.railway.app/api`, then deploy.
+4. **Vercel** → import the same repo, set **Root Directory** to `apps/web` and **Framework Preset** to *Vite* (both are auto-detected). Vercel installs from the workspace lockfile at the repository root on its own. Set `VITE_API_URL` to `https://<project>.up.railway.app/api`, then deploy.
 5. Back on Railway, set `CORS_ORIGINS` to the Vercel URL and redeploy.
 6. **Twilio Console** → repoint the four webhooks (SMS, WhatsApp, voice, voice status) at the Railway domain, as described under [Webhook Setup](#webhook-setup).
 7. Stop the local API and ngrok.
@@ -257,6 +257,11 @@ Because `APP_PUBLIC_URL` must contain the Railway domain, which only exists afte
 > **Run one environment at a time.** Production and local development share the same Supabase project and the same mailbox. Two instances running together would both register a Graph subscription and both store each inbound mail, duplicating messages.
 
 Migrations are not replayed by the deploy: the target Supabase database is already migrated. Run `npx prisma migrate deploy` manually after a schema change.
+
+Both platforms watch the same repository, so a push touching only one app would redeploy both. They handle it differently:
+
+- **Vercel** skips unaffected projects by itself, but only if every workspace package carries a unique `name`. This is why `apps/web` is named `web` and not `poc-inbox` like the repository root — a duplicate name silently disables the feature.
+- **Railway** has no equivalent, so set **Watch Paths** to `apps/api/**` on the service. Without it, a frontend-only commit restarts the API, which re-registers a Graph subscription for nothing.
 
 Notes on the build:
 
