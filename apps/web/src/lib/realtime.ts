@@ -1,4 +1,5 @@
 import { BASE_URL, type RawConversation } from "./api";
+import { getAccessPassword } from "./auth";
 import type { Message } from "../types";
 
 /**
@@ -24,7 +25,12 @@ export interface InboxSubscriptionHandlers {
 export function subscribeToInbox(
   handlers: InboxSubscriptionHandlers,
 ): () => void {
-  const source = new EventSource(`${BASE_URL}/realtime/stream`);
+  // `EventSource` cannot send custom headers, so the shared password travels as
+  // a query parameter here. The API only accepts that form on this route.
+  const password = getAccessPassword();
+  const query = password ? `?token=${encodeURIComponent(password)}` : "";
+
+  const source = new EventSource(`${BASE_URL}/realtime/stream${query}`);
 
   source.onmessage = (e: MessageEvent<string>) => {
     let event: InboxEvent;

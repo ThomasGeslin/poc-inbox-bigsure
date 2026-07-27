@@ -5,7 +5,29 @@ import { json, urlencoded } from 'express';
 import { AppModule } from './app.module';
 import { MsGraphMailService } from './inbox/services/ms-graph-mail.service';
 
+const DEV_CORS_ORIGINS = ['http://localhost:5173', 'http://localhost:5174'];
+
+/**
+ * Browser origins allowed to call the API: the deployed frontend in production
+ * (comma-separated in CORS_ORIGINS), the Vite dev servers otherwise.
+ */
+function resolveCorsOrigins(): string[] {
+  const configured = process.env.CORS_ORIGINS?.split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
+  return configured?.length ? configured : DEV_CORS_ORIGINS;
+}
+
 async function bootstrap() {
+  // Fail fast rather than serve every endpoint unprotected: a forgotten
+  // variable in the hosting dashboard would otherwise go unnoticed.
+  if (!process.env.APP_ACCESS_PASSWORD) {
+    throw new Error(
+      'APP_ACCESS_PASSWORD must be defined — refusing to start with unprotected endpoints',
+    );
+  }
+
   const app = await NestFactory.create(AppModule);
 
   // Parse JSON and URL-encoded bodies (required for Twilio webhooks and REST API)
@@ -21,7 +43,7 @@ async function bootstrap() {
   );
 
   app.enableCors({
-    origin: ['http://localhost:5173', 'http://localhost:5174'],
+    origin: resolveCorsOrigins(),
     methods: ['GET', 'POST', 'PATCH', 'DELETE'],
   });
   app.setGlobalPrefix('api');

@@ -30,7 +30,12 @@ import {
   extFromContentType,
 } from '../utils/attachment.utils';
 import { StorageService } from '../services/storage.service';
+import { Public } from '../../auth/public.decorator';
 
+// Twilio and Microsoft Graph cannot send our shared-password header. Every route
+// below authenticates its caller on its own: Twilio via the X-Twilio-Signature
+// HMAC, Graph via the `clientState` it echoes back from the subscription.
+@Public()
 @Controller('webhooks')
 export class WebhooksController {
   private readonly logger = new Logger(WebhooksController.name);

@@ -27,6 +27,7 @@ This project uses **npm workspaces** to manage both apps from the root.
 | SMS / WhatsApp / Voice | Twilio                                      |
 | Attachments | Supabase Storage                                       |
 | Realtime | Server-Sent Events (SSE)                                  |
+| Access   | Single shared team password (NestJS global guard)          |
 | Icons    | Lucide React                                              |
 | Testing  | Jest, Supertest                                           |
 
@@ -84,6 +85,15 @@ PORT=3000
 # Use your ngrok / production URL — no trailing slash
 APP_PUBLIC_URL="https://your-ngrok-or-domain.example.com"
 
+# ── Access control ───────────────────────────────────────────────────────────
+# Shared team password required on every /api route except the webhooks.
+# The API REFUSES TO START without it, so a forgotten variable can never leave
+# the endpoints open. Any long random string works.
+APP_ACCESS_PASSWORD="change-me"
+# Browser origins allowed by CORS, comma-separated. Leave empty in local
+# development: the Vite dev servers (5173/5174) are then allowed by default.
+CORS_ORIGINS=""
+
 # ── Twilio (SMS, WhatsApp, Voice) ────────────────────────────────────────────
 TWILIO_ACCOUNT_SID="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 TWILIO_AUTH_TOKEN="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
@@ -108,7 +118,21 @@ MS_GRAPH_WEBHOOK_SECRET="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 TEST_MAIL="your-mailbox@yourdomain.com"
 ```
 
-### 3. Run database migrations
+### 3. Configure the frontend environment
+
+```bash
+cp apps/web/.env.example apps/web/.env
+```
+
+A single variable, the API base URL including its `/api` prefix:
+
+```env
+VITE_API_URL="http://localhost:3000/api"
+```
+
+> Vite inlines this at **build** time. Changing it on a host requires a redeploy, not just a restart.
+
+### 4. Run database migrations
 
 ```bash
 cd apps/api
@@ -117,7 +141,7 @@ npx prisma migrate deploy
 
 > For local development you can also use `npx prisma migrate dev` which will prompt for a migration name when the schema changes.
 
-### 4. Start both apps concurrently
+### 5. Start both apps concurrently
 
 ```bash
 # From the root — starts api + web in parallel
@@ -194,6 +218,51 @@ What you need to know:
 - `MS_GRAPH_WEBHOOK_SECRET` is sent as the subscription's `clientState`; the API rejects any notification whose `clientState` doesn't match.
 - Subscriptions are short-lived (~3 days), so the service auto-renews them every 2 days.
 - On each notification the API fetches the full message from Graph, strips the quoted reply chain, downloads image/PDF attachments to Supabase Storage, and dispatches a `ReceiveMailCommand`.
+
+---
+
+## Access Control
+
+The POC is gated by **one shared team password**, not per-user accounts. `AccessPasswordGuard` is registered globally in [app.module.ts](apps/api/src/app.module.ts) and compares the `x-poc-password` header against `APP_ACCESS_PASSWORD` in constant time.
+
+| Route | Protection |
+| ----- | ---------- |
+| `/api/*` | `x-poc-password` header, injected by `apiFetch` in [api.ts](apps/web/src/lib/api.ts) |
+| `/api/realtime/stream` | Same password as `?token=` — `EventSource` cannot send custom headers |
+| `/api/webhooks/*` | `@Public()`: Twilio signature and Graph `clientState` instead |
+| `/api` (root) | `@Public()`: platform health check |
+
+Two decorators control this, both in [public.decorator.ts](apps/api/src/auth/public.decorator.ts): `@Public()` exempts a route, `@AllowQueryToken()` additionally accepts the `?token=` form. Keep `@AllowQueryToken()` on the SSE route only — query strings land in access logs.
+
+The frontend prompts for the password once ([PasswordGate.tsx](apps/web/src/components/PasswordGate.tsx)), stores it in `localStorage`, and re-validates it against `GET /api/auth/check` on every load. A `401` from any call clears it and brings the prompt back.
+
+**Known limitation:** attachments live in a *public* Supabase bucket, so their URLs are reachable without the password. Signed URLs would be needed to close that.
+
+---
+
+## Deployment
+
+The API runs on **Railway** (a persistent process — it must not sleep, since the Graph subscription is registered at startup and renewed every 2 days) and the frontend on **Vercel** (static build). Config lives in [railway.json](railway.json) and [vercel.json](vercel.json).
+
+Because `APP_PUBLIC_URL` must contain the Railway domain, which only exists after the first deploy, the order matters:
+
+1. Push to `main`.
+2. **Railway** → new project from the GitHub repo. Add every variable from `apps/api/.env` except `PORT` (Railway injects it), plus `APP_ACCESS_PASSWORD`. Deploy. The Graph subscription fails at this stage — expected.
+3. Generate the Railway domain, then set `APP_PUBLIC_URL` and `TWILIO_WEBHOOK_BASE_URL` to `https://<project>.up.railway.app` and redeploy. The subscription now registers.
+4. **Vercel** → import the same repo. Leave **Root Directory** at the repository root: [vercel.json](vercel.json) drives the build through the workspace. Set `VITE_API_URL` to `https://<project>.up.railway.app/api`, then deploy.
+5. Back on Railway, set `CORS_ORIGINS` to the Vercel URL and redeploy.
+6. **Twilio Console** → repoint the four webhooks (SMS, WhatsApp, voice, voice status) at the Railway domain, as described under [Webhook Setup](#webhook-setup).
+7. Stop the local API and ngrok.
+
+> **Run one environment at a time.** Production and local development share the same Supabase project and the same mailbox. Two instances running together would both register a Graph subscription and both store each inbound mail, duplicating messages.
+
+Migrations are not replayed by the deploy: the target Supabase database is already migrated. Run `npx prisma migrate deploy` manually after a schema change.
+
+Notes on the build:
+
+- `npm run build` in `apps/api` runs `prisma generate` first, since the Prisma 7 client is not generated at install time.
+- The compiled entrypoint is `dist/src/main.js` — not `dist/main.js` — because the source tree spans both `src/` and `prisma/`, which lifts TypeScript's inferred root directory.
+- **Do not set `NODE_ENV=production` on Railway.** The build needs `@nestjs/cli`, a devDependency; with that variable set, the install step skips devDependencies and `nest build` fails with "nest: not found". Railway already runs the app in production mode without it.
 
 ---
 
