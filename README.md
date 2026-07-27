@@ -255,7 +255,7 @@ Because `APP_PUBLIC_URL` must contain the Railway domain, which only exists afte
 5. **Vercel** → import the same repo, set **Root Directory** to `apps/web` and **Framework Preset** to *Vite* (both are auto-detected). Set `VITE_API_URL` to `https://<project>.up.railway.app/api` — **with `/api` this time**, since the frontend concatenates paths straight onto it — then deploy.
 
    Leave **Build Command** and **Output Directory** empty so the Vite preset supplies them. Every command runs *from* `apps/web`, so workspace-scoped overrides break: `npm run build --workspace=apps/web` fails with `No workspaces found`, and an output directory of `apps/web/dist` resolves to `apps/web/apps/web/dist`. The defaults — `npm run build` and `dist` — are what you want.
-6. Back on Railway, set `CORS_ORIGINS` to the Vercel URL and redeploy.
+6. Back on Railway, set `CORS_ORIGINS` to the Vercel URL — origin only, `https://<project>.vercel.app`, **no path** — and redeploy. Browsers send `Origin` as `scheme://host[:port]`, and the `cors` package matches it by strict equality, so any extra character silently blocks every request. Trailing slashes are stripped by [cors-origins.ts](apps/api/src/cors-origins.ts) as a safety net.
 7. **Twilio Console** → repoint the four webhooks (SMS, WhatsApp, voice, voice status) at the Railway domain, as described under [Webhook Setup](#webhook-setup).
 8. Stop the local API and ngrok.
 
