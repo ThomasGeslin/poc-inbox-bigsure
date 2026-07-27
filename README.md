@@ -247,12 +247,15 @@ The API runs on **Railway** (a persistent process — it must not sleep, since t
 Because `APP_PUBLIC_URL` must contain the Railway domain, which only exists after the first deploy, the order matters:
 
 1. Push to `main`.
-2. **Railway** → new project from the GitHub repo. Add every variable from `apps/api/.env` except `PORT` (Railway injects it), plus `APP_ACCESS_PASSWORD`. Deploy. The Graph subscription fails at this stage — expected.
-3. Generate the Railway domain, then set `APP_PUBLIC_URL` and `TWILIO_WEBHOOK_BASE_URL` to `https://<project>.up.railway.app` and redeploy. The subscription now registers.
-4. **Vercel** → import the same repo, set **Root Directory** to `apps/web` and **Framework Preset** to *Vite* (both are auto-detected). Vercel installs from the workspace lockfile at the repository root on its own. Set `VITE_API_URL` to `https://<project>.up.railway.app/api`, then deploy.
-5. Back on Railway, set `CORS_ORIGINS` to the Vercel URL and redeploy.
-6. **Twilio Console** → repoint the four webhooks (SMS, WhatsApp, voice, voice status) at the Railway domain, as described under [Webhook Setup](#webhook-setup).
-7. Stop the local API and ngrok.
+2. **Railway** → new project from the GitHub repo, **Root Directory left at the repository root**. Add every variable from `apps/api/.env`, `PORT=3000` included, plus `APP_ACCESS_PASSWORD`. Deploy. The Graph subscription fails at this stage — expected, the domain does not exist yet.
+3. Generate the domain: service **Settings → Networking → Public Networking → Generate Domain**, and answer **3000** when it asks for the target port. It must match the `PORT` variable, otherwise every request returns 502 — Railway injects `8080` when `PORT` is undefined, which is the usual cause of that error here.
+4. Set `APP_PUBLIC_URL` and `TWILIO_WEBHOOK_BASE_URL` to `https://<project>.up.railway.app` — **no `/api`, no trailing slash** — and redeploy. The subscription now registers.
+
+   The code appends the path itself: `${APP_PUBLIC_URL}/api/webhooks/ms-graph/mail` for Graph, and `${TWILIO_WEBHOOK_BASE_URL}${req.originalUrl}` for Twilio. A trailing slash yields `//api/…`, and since Twilio signs the exact URL, its signature check then rejects every inbound webhook with a 401 while the URL still works fine in a browser.
+5. **Vercel** → import the same repo, set **Root Directory** to `apps/web` and **Framework Preset** to *Vite* (both are auto-detected). Vercel installs from the workspace lockfile at the repository root on its own. Set `VITE_API_URL` to `https://<project>.up.railway.app/api` — **with `/api` this time**, since the frontend concatenates paths straight onto it — then deploy.
+6. Back on Railway, set `CORS_ORIGINS` to the Vercel URL and redeploy.
+7. **Twilio Console** → repoint the four webhooks (SMS, WhatsApp, voice, voice status) at the Railway domain, as described under [Webhook Setup](#webhook-setup).
+8. Stop the local API and ngrok.
 
 > **Run one environment at a time.** Production and local development share the same Supabase project and the same mailbox. Two instances running together would both register a Graph subscription and both store each inbound mail, duplicating messages.
 
